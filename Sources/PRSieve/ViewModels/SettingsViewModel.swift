@@ -4,7 +4,6 @@ import SwiftUI
 final class SettingsViewModel {
     var settings: AppSettings = .default
     var githubToken: String = ""
-    var buildkiteToken: String = ""
     var llmAPIKey: String = ""
     var newRepoText: String = ""
     var isSaving = false
@@ -19,7 +18,6 @@ final class SettingsViewModel {
     func load() async {
         settings = await persistence.loadSettings()
         githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
-        buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""
     }
 
@@ -29,7 +27,6 @@ final class SettingsViewModel {
         do {
             try await persistence.saveSettings(settings)
             await persistence.saveToken(githubToken, forKey: "github_token")
-            await persistence.saveToken(buildkiteToken, forKey: "buildkite_token")
             await persistence.saveToken(llmAPIKey, forKey: "llm_api_key")
         } catch {
             saveError = error.localizedDescription

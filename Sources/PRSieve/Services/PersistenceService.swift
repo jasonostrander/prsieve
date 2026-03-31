@@ -1,10 +1,10 @@
 import Foundation
-import Security
 
 actor PersistenceService {
     private let appSupportDir: URL
     private let settingsURL: URL
     private let pullRequestsURL: URL
+    private let tokensURL: URL
     private let codeownersCacheDir: URL
 
     private let encoder: JSONEncoder = {
@@ -25,6 +25,7 @@ actor PersistenceService {
         appSupportDir = appSupport.appendingPathComponent("PRSieve", isDirectory: true)
         settingsURL = appSupportDir.appendingPathComponent("settings.json")
         pullRequestsURL = appSupportDir.appendingPathComponent("pull_requests.json")
+        tokensURL = appSupportDir.appendingPathComponent(".tokens.json")
         codeownersCacheDir = appSupportDir.appendingPathComponent("codeowners_cache", isDirectory: true)
 
         try FileManager.default.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
@@ -46,41 +47,34 @@ actor PersistenceService {
         try data.write(to: settingsURL, options: .atomic)
     }
 
-    // MARK: - Keychain (tokens)
+    // MARK: - Tokens (file-based, avoids Keychain prompts for unsigned apps)
+
+    private func loadTokens() -> [String: String] {
+        guard let data = try? Data(contentsOf: tokensURL),
+              let tokens = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return tokens
+    }
+
+    private func saveTokens(_ tokens: [String: String]) {
+        guard let data = try? JSONEncoder().encode(tokens) else { return }
+        try? data.write(to: tokensURL, options: .atomic)
+        // Restrict file permissions to owner-only
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: tokensURL.path
+        )
+    }
 
     func loadToken(forKey key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.jasonostrander.prsieve",
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        loadTokens()[key]
     }
 
     func saveToken(_ token: String, forKey key: String) {
-        let data = token.data(using: .utf8)!
-
-        // Delete existing
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.jasonostrander.prsieve",
-            kSecAttrAccount as String: key,
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        // Add new
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.jasonostrander.prsieve",
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
+        var tokens = loadTokens()
+        tokens[key] = token
+        saveTokens(tokens)
     }
 
     // MARK: - Pull Requests

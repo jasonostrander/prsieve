@@ -69,24 +69,29 @@ actor GitHubClient {
         return pullRequests
     }
 
+    // MARK: - URL Helpers
+
+    /// Build a URL path without percent-encoding slashes in repo names.
+    private func repoURL(_ repo: String, path: String = "") -> URL {
+        // repo is "owner/repo", path is e.g. "/pulls/123"
+        let urlString = "\(baseURL)/repos/\(repo)\(path)"
+        return URL(string: urlString)!
+    }
+
     // MARK: - Fetch full PR detail
 
     func fetchPRDetail(repo: String, number: Int) async throws -> PullRequest {
-        let url = baseURL
-            .appendingPathComponent("repos")
-            .appendingPathComponent(repo)
-            .appendingPathComponent("pulls")
-            .appendingPathComponent("\(number)")
+        let url = repoURL(repo, path: "/pulls/\(number)")
         let data = try await fetch(url)
         let ghPR = try decoder.decode(GitHubPR.self, from: data)
 
         // Fetch files changed
-        let filesURL = url.appendingPathComponent("files")
+        let filesURL = repoURL(repo, path: "/pulls/\(number)/files")
         let filesData = try await fetch(filesURL)
         let files = try decoder.decode([GitHubFile].self, from: filesData)
 
         // Fetch reviews to determine review status
-        let reviewsURL = url.appendingPathComponent("reviews")
+        let reviewsURL = repoURL(repo, path: "/pulls/\(number)/reviews")
         let reviewsData = try await fetch(reviewsURL)
         let reviews = try decoder.decode([GitHubReview].self, from: reviewsData)
 
@@ -110,7 +115,7 @@ actor GitHubClient {
             reviewStatus: reviewStatus,
             isRequestedReviewer: false, // will be set by caller
             isMentioned: false, // will be determined separately
-            category: .fyi, // default, will be categorized
+            category: .low, // default, will be categorized
             categoryOverridden: false,
             categoryReason: "",
             buildStatus: nil,
@@ -126,11 +131,7 @@ actor GitHubClient {
     func fetchCodeowners(repo: String) async throws -> String? {
         let paths = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
         for path in paths {
-            let url = baseURL
-                .appendingPathComponent("repos")
-                .appendingPathComponent(repo)
-                .appendingPathComponent("contents")
-                .appendingPathComponent(path)
+            let url = repoURL(repo, path: "/contents/\(path)")
             do {
                 let data = try await fetch(url)
                 let file = try decoder.decode(GitHubContentFile.self, from: data)
@@ -148,12 +149,7 @@ actor GitHubClient {
     // MARK: - Check if user is mentioned in PR comments
 
     func isUserMentioned(repo: String, number: Int, username: String) async throws -> Bool {
-        let url = baseURL
-            .appendingPathComponent("repos")
-            .appendingPathComponent(repo)
-            .appendingPathComponent("issues")
-            .appendingPathComponent("\(number)")
-            .appendingPathComponent("comments")
+        let url = repoURL(repo, path: "/issues/\(number)/comments")
         let data = try await fetch(url)
         let comments = try decoder.decode([GitHubComment].self, from: data)
         let mention = "@\(username)"
@@ -192,9 +188,29 @@ actor GitHubClient {
 
 // MARK: - GitHub API Response Types
 
-enum GitHubError: Error, Sendable {
+enum GitHubError: Error, LocalizedError, Sendable {
     case invalidResponse
     case httpError(Int, String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "GitHub: Invalid response"
+        case .httpError(401, _):
+            return "GitHub: Authentication failed — check your token"
+        case .httpError(403, let body):
+            if body?.contains("rate limit") == true {
+                return "GitHub: Rate limit exceeded — try again later"
+            }
+            return "GitHub: Forbidden (403) — check token scopes (needs repo access)"
+        case .httpError(404, _):
+            return "GitHub: Not found (404) — check repo name"
+        case .httpError(422, let body):
+            return "GitHub: Validation error (422) — \(body?.prefix(200) ?? "unknown")"
+        case .httpError(let code, let body):
+            return "GitHub: HTTP \(code) — \(body?.prefix(200) ?? "unknown")"
+        }
+    }
 }
 
 // Search API

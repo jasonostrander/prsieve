@@ -1,14 +1,13 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @State var viewModel: SettingsViewModel
 
     var body: some View {
         TabView {
             githubTab
                 .tabItem { Label("GitHub", systemImage: "person.crop.circle") }
-            buildkiteTab
-                .tabItem { Label("Buildkite", systemImage: "hammer") }
             llmTab
                 .tabItem { Label("LLM", systemImage: "brain") }
             preferencesTab
@@ -23,11 +22,14 @@ struct SettingsView: View {
         .onChange(of: viewModel.githubToken) { _, _ in
             Task { await viewModel.save() }
         }
-        .onChange(of: viewModel.buildkiteToken) { _, _ in
-            Task { await viewModel.save() }
-        }
+
         .onChange(of: viewModel.llmAPIKey) { _, _ in
             Task { await viewModel.save() }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button("Done") { dismiss() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .padding()
         }
     }
 
@@ -44,16 +46,8 @@ struct SettingsView: View {
             Section("Repositories") {
                 List {
                     ForEach(viewModel.settings.repos) { repo in
-                        HStack {
-                            Text(repo.repo)
-                                .font(.body.monospaced())
-                            Spacer()
-                            if let pipeline = repo.buildkitePipeline, !pipeline.isEmpty {
-                                Text(pipeline)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        Text(repo.repo)
+                            .font(.body.monospaced())
                     }
                     .onDelete(perform: viewModel.removeRepo)
                 }
@@ -65,25 +59,6 @@ struct SettingsView: View {
                     Button("Add") { viewModel.addRepo() }
                         .disabled(viewModel.newRepoText.isEmpty)
                 }
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    // MARK: - Buildkite Tab
-
-    private var buildkiteTab: some View {
-        Form {
-            Section("Buildkite") {
-                TextField("Organization Slug", text: $viewModel.settings.buildkiteOrgSlug)
-                SecureField("API Token", text: $viewModel.buildkiteToken)
-                    .textContentType(.password)
-            }
-
-            Section {
-                Text("Pipeline slugs default to the repository name. You can override per-repo in the GitHub tab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

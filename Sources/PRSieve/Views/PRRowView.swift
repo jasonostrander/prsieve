@@ -1,86 +1,69 @@
 import SwiftUI
 
-struct PRRowView: View {
+struct PRCardView: View {
     let pr: PullRequest
     let onOverrideCategory: (PRCategory) -> Void
     let onToggleFlag: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Build status indicator
-            buildStatusBadge
-                .frame(width: 20)
+        VStack(alignment: .leading, spacing: 6) {
+            // Title + age
+            HStack(alignment: .firstTextBaseline) {
+                Text(pr.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
 
-            VStack(alignment: .leading, spacing: 4) {
-                // Title row
-                HStack(alignment: .firstTextBaseline) {
-                    Text(pr.title)
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .lineLimit(2)
+                Spacer(minLength: 8)
 
-                    Spacer()
-
-                    if pr.isFlagged {
-                        Image(systemName: "flag.fill")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                    }
+                if pr.isFlagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
                 }
 
-                // Metadata row
-                HStack(spacing: 8) {
-                    Text(pr.repoShortName)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                Text(pr.ageDescription)
+                    .font(.caption)
+                    .foregroundStyle(ageColor)
+                    .monospacedDigit()
+            }
 
-                    Label(pr.author, systemImage: "person")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            // Compact metadata
+            HStack(spacing: 6) {
+                Text(pr.repoShortName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                    Label(pr.ageDescription, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(ageColor)
+                Text("·")
+                    .foregroundStyle(.quaternary)
 
-                    Text("#\(pr.number)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.tertiary)
+                Text(pr.author)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                    reviewStatusBadge
-
-                    if pr.isDraft {
-                        Text("Draft")
-                            .font(.caption)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.gray.opacity(0.2))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
-
-                    // Labels
-                    ForEach(pr.labels.prefix(3), id: \.self) { label in
-                        Text(label)
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.blue.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
+                if let status = pr.buildStatus, status != .unknown {
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Image(systemName: status.symbol)
+                        .font(.caption2)
+                        .foregroundStyle(buildStatusColor(status))
                 }
 
-                // Category reason
-                if !pr.categoryReason.isEmpty {
-                    Text(pr.categoryReason)
+                if pr.isDraft {
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text("Draft")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .italic()
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PRTheme.cardBackground(for: pr.category))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .opacity(pr.isMerged ? 0.5 : 1.0)
         .contentShape(Rectangle())
         .contextMenu {
             Button("Open in Browser") {
@@ -110,52 +93,17 @@ struct PRRowView: View {
         }
     }
 
-    // MARK: - Subviews
-
-    private var buildStatusBadge: some View {
-        Group {
-            if let status = pr.buildStatus {
-                Image(systemName: status.symbol)
-                    .foregroundStyle(buildStatusColor(status))
-                    .help("Build: \(status.rawValue)")
-            } else {
-                Image(systemName: "circle.dotted")
-                    .foregroundStyle(.quaternary)
-            }
-        }
-        .font(.body)
-    }
-
-    private var reviewStatusBadge: some View {
-        Group {
-            switch pr.reviewStatus {
-            case .approved:
-                Label("Approved", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            case .changesRequested:
-                Label("Changes Requested", systemImage: "exclamationmark.circle.fill")
-                    .foregroundStyle(.orange)
-            case .dismissed:
-                Label("Dismissed", systemImage: "minus.circle")
-                    .foregroundStyle(.secondary)
-            case .pending:
-                EmptyView()
-            }
-        }
-        .font(.caption)
-    }
-
     private var ageColor: Color {
         let hours = pr.age / 3600
-        if hours > 72 { return .red }
-        if hours > 24 { return .orange }
+        if hours > 72 { return .red.opacity(0.8) }
+        if hours > 24 { return .orange.opacity(0.8) }
         return .secondary
     }
 
     private func buildStatusColor(_ status: BuildStatus) -> Color {
         switch status {
         case .passed: .green
-        case .failed: .red
+        case .failed: .red.opacity(0.8)
         case .running: .orange
         case .unknown: .gray
         }

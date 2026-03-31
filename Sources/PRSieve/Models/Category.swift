@@ -1,23 +1,23 @@
 import Foundation
 
 enum PRCategory: String, Codable, CaseIterable, Comparable, Sendable {
-    case mustReview = "must-review"
-    case shouldKnow = "should-know"
-    case fyi = "fyi"
+    case priority = "priority"
+    case low = "low"
+    case noise = "noise"
 
     var displayName: String {
         switch self {
-        case .mustReview: "Must Review"
-        case .shouldKnow: "Should Know"
-        case .fyi: "FYI"
+        case .priority: "Priority"
+        case .low: "Low"
+        case .noise: "Noise"
         }
     }
 
     var sortOrder: Int {
         switch self {
-        case .mustReview: 0
-        case .shouldKnow: 1
-        case .fyi: 2
+        case .priority: 0
+        case .low: 1
+        case .noise: 2
         }
     }
 

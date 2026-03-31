@@ -6,35 +6,20 @@ struct CategoryHeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
+            Image(systemName: PRTheme.icon(for: category))
+                .foregroundStyle(PRTheme.accent(for: category))
             Text(category.displayName)
                 .font(.headline)
+                .foregroundStyle(.primary)
             Text("\(count)")
                 .font(.caption)
-                .padding(.horizontal, 6)
+                .fontWeight(.medium)
+                .padding(.horizontal, 7)
                 .padding(.vertical, 2)
-                .background(color.opacity(0.15))
+                .background(PRTheme.accent(for: category).opacity(0.15))
                 .clipShape(Capsule())
-                .foregroundStyle(color)
+                .foregroundStyle(PRTheme.accent(for: category))
             Spacer()
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var icon: String {
-        switch category {
-        case .mustReview: "exclamationmark.triangle.fill"
-        case .shouldKnow: "eye.fill"
-        case .fyi: "info.circle"
-        }
-    }
-
-    private var color: Color {
-        switch category {
-        case .mustReview: .red
-        case .shouldKnow: .orange
-        case .fyi: .blue
         }
     }
 }

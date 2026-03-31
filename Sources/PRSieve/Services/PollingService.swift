@@ -98,16 +98,6 @@ actor PollingService {
                     pr.lastCategorizedAt = Date()
                 }
 
-                // Fetch build status
-                let pipelineSlug = BuildkiteClient.pipelineSlug(
-                    forRepo: repo,
-                    override: repoConfig.buildkitePipeline
-                )
-                pr.buildStatus = try? await buildkiteClient.fetchBuildStatus(
-                    pipelineSlug: pipelineSlug,
-                    branch: pr.headBranch
-                )
-
                 allPRs.append(pr)
             }
         }

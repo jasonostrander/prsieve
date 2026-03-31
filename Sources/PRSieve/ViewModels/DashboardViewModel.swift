@@ -14,11 +14,11 @@ final class DashboardViewModel {
     private(set) var persistence: PersistenceService?
     private var pollingTask: Task<Void, Never>?
 
-    var mustReview: [PullRequest] { filtered(.mustReview) }
-    var shouldKnow: [PullRequest] { filtered(.shouldKnow) }
-    var fyi: [PullRequest] { filtered(.fyi) }
+    var priority: [PullRequest] { filtered(.priority) }
+    var low: [PullRequest] { filtered(.low) }
+    var noise: [PullRequest] { filtered(.noise) }
 
-    var totalCount: Int { mustReview.count + shouldKnow.count + fyi.count }
+    var totalCount: Int { priority.count + low.count + noise.count }
 
     private func filtered(_ category: PRCategory) -> [PullRequest] {
         pullRequests
@@ -36,8 +36,12 @@ final class DashboardViewModel {
             || pr.labels.contains { $0.lowercased().contains(query) }
     }
 
-    func setup(persistence: PersistenceService, pollingService: PollingService) {
+    func setup(persistence: PersistenceService, pollingService: PollingService?) {
         self.persistence = persistence
+        self.pollingService = pollingService
+    }
+
+    func updatePollingService(_ pollingService: PollingService) {
         self.pollingService = pollingService
     }
 

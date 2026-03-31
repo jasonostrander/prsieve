@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @Bindable var viewModel: DashboardViewModel
+    var onSettingsDismissed: (() -> Void)?
     @State private var showSettings = false
 
     var body: some View {
@@ -45,12 +46,14 @@ struct DashboardView: View {
             .navigationTitle("PRSieve")
             .navigationSubtitle(subtitle)
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: {
+            onSettingsDismissed?()
+        }) {
             if let persistence = viewModel.persistence {
                 SettingsView(viewModel: SettingsViewModel(persistence: persistence))
             }
         }
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom) {
             if let error = viewModel.error {
                 errorBanner(error)
             }
@@ -60,64 +63,54 @@ struct DashboardView: View {
     // MARK: - Subviews
 
     private var prList: some View {
-        List {
-            if !viewModel.mustReview.isEmpty {
-                Section {
-                    ForEach(viewModel.mustReview) { pr in
-                        prRow(pr)
-                    }
-                } header: {
-                    CategoryHeaderView(category: .mustReview, count: viewModel.mustReview.count)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if !viewModel.priority.isEmpty {
+                    categorySection(.priority, prs: viewModel.priority)
+                }
+                if !viewModel.low.isEmpty {
+                    categorySection(.low, prs: viewModel.low)
+                }
+                if !viewModel.noise.isEmpty {
+                    categorySection(.noise, prs: viewModel.noise)
+                }
+
+                if viewModel.totalCount == 0 {
+                    ContentUnavailableView(
+                        "No PRs match",
+                        systemImage: "magnifyingglass",
+                        description: Text(viewModel.searchText.isEmpty
+                            ? "No open PRs requiring your review right now."
+                            : "Try a different search term.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
                 }
             }
-
-            if !viewModel.shouldKnow.isEmpty {
-                Section {
-                    ForEach(viewModel.shouldKnow) { pr in
-                        prRow(pr)
-                    }
-                } header: {
-                    CategoryHeaderView(category: .shouldKnow, count: viewModel.shouldKnow.count)
-                }
-            }
-
-            if !viewModel.fyi.isEmpty {
-                Section {
-                    ForEach(viewModel.fyi) { pr in
-                        prRow(pr)
-                    }
-                } header: {
-                    CategoryHeaderView(category: .fyi, count: viewModel.fyi.count)
-                }
-            }
-
-            if viewModel.totalCount == 0 {
-                ContentUnavailableView(
-                    "No PRs match",
-                    systemImage: "magnifyingglass",
-                    description: Text(viewModel.searchText.isEmpty
-                        ? "No open PRs requiring your review right now."
-                        : "Try a different search term.")
-                )
-            }
+            .padding()
         }
-        .listStyle(.sidebar)
+        .background(Color(.windowBackgroundColor))
     }
 
-    private func prRow(_ pr: PullRequest) -> some View {
-        PRRowView(
-            pr: pr,
-            onOverrideCategory: { category in
-                viewModel.overrideCategory(prID: pr.id, to: category)
-            },
-            onToggleFlag: {
-                viewModel.toggleFlag(prID: pr.id)
+    private func categorySection(_ category: PRCategory, prs: [PullRequest]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CategoryHeaderView(category: category, count: prs.count)
+
+            ForEach(prs) { pr in
+                PRCardView(
+                    pr: pr,
+                    onOverrideCategory: { cat in
+                        viewModel.overrideCategory(prID: pr.id, to: cat)
+                    },
+                    onToggleFlag: {
+                        viewModel.toggleFlag(prID: pr.id)
+                    }
+                )
+                .onTapGesture(count: 2) {
+                    NSWorkspace.shared.open(pr.htmlURL)
+                }
             }
-        )
-        .onTapGesture(count: 2) {
-            NSWorkspace.shared.open(pr.htmlURL)
         }
-        .opacity(pr.isMerged ? 0.6 : 1.0)
     }
 
     private var emptyState: some View {
@@ -149,7 +142,8 @@ struct DashboardView: View {
         .padding(10)
         .background(.red.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding()
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 
     private var subtitle: String {
