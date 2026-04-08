@@ -302,6 +302,43 @@ func runAllTests() async {
         t.checkEqual(reviewers[0].avatarURL?.absoluteString, "https://example.com/alice.png", "avatar URL preserved")
     }
 
+    // --- BuildStatus ---
+
+    do {
+        t.checkEqual(BuildStatus.passed.symbol, "checkmark.circle.fill", "passed symbol")
+        t.checkEqual(BuildStatus.failed.symbol, "xmark.circle.fill", "failed symbol")
+        t.checkEqual(BuildStatus.running.symbol, "arrow.triangle.2.circlepath", "running symbol")
+    }
+
+    // GitHubCombinedStatus decoding
+    do {
+        let json = #"{"state": "success", "total_count": 3}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let status = try! decoder.decode(GitHubCombinedStatus.self, from: json.data(using: .utf8)!)
+        t.checkEqual(status.state, "success", "combined status state")
+        t.checkEqual(status.totalCount, 3, "combined status total count")
+    }
+
+    do {
+        let json = #"{"state": "pending", "total_count": 0}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let status = try! decoder.decode(GitHubCombinedStatus.self, from: json.data(using: .utf8)!)
+        t.checkEqual(status.state, "pending", "pending state")
+        t.checkEqual(status.totalCount, 0, "no checks pending")
+    }
+
+    // Build status on PR model
+    do {
+        var pr = makePR()
+        t.check(pr.buildStatus == nil, "default buildStatus is nil")
+        pr.buildStatus = .passed
+        t.checkEqual(pr.buildStatus, .passed, "buildStatus can be set to passed")
+        pr.buildStatus = .failed
+        t.checkEqual(pr.buildStatus, .failed, "buildStatus can be set to failed")
+    }
+
     // --- PullRequest Model ---
 
     do {
