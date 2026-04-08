@@ -13,11 +13,21 @@ struct MenuBarPRListView: View {
 
                 Spacer()
 
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                        .frame(width: 16, height: 16)
+                Button {
+                    Task { await viewModel.refresh() }
+                } label: {
+                    ZStack {
+                        Image(systemName: "arrow.clockwise")
+                            .opacity(viewModel.isLoading ? 0 : 1)
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .opacity(viewModel.isLoading ? 1 : 0)
+                    }
+                    .frame(width: 16, height: 16)
                 }
+                .buttonStyle(.plain)
+                .help("Refresh now")
+                .disabled(viewModel.isLoading)
 
                 Toggle(isOn: $viewModel.showReadyToMerge) {
                     Image(systemName: "checkmark.diamond")
@@ -74,6 +84,7 @@ struct MenuBarPRListView: View {
             .padding(.vertical, 6)
         }
         .frame(width: 420, height: 580)
+        .focusEffectDisabled()
         .sheet(isPresented: $showSettings) {
             if let persistence = viewModel.persistence {
                 SettingsView(viewModel: SettingsViewModel(persistence: persistence))
