@@ -95,16 +95,18 @@ actor CategorizationService {
         let systemPrompt = """
             You are a PR triage assistant. Categorize the PR into exactly one of two tiers:
 
-            - "priority": ANY of the changed files are in code the user owns, maintains, or has \
-            domain expertise in. Even if the PR's primary purpose is unrelated, if it modifies files \
-            in the user's area, they need to review those changes. Also priority if the user is a \
-            direct codeowner (not a fallthrough/catch-all pattern) based on the CODEOWNERS file.
-            - "low": None of the changed files are in the user's area of ownership. The user is \
-            likely assigned only through fallthrough codeownership (catch-all patterns like * or \
-            broad team patterns).
+            - "priority": The changed files are in code the user ACTUALLY owns, maintains, or has \
+            domain expertise in, as described in their ownership context.
+            - "low": The changed files are NOT in the user's area of actual ownership or interest.
 
-            IMPORTANT: Focus on the FILE PATHS changed, not the PR title or description. If even \
-            one file is in a directory or module the user owns, categorize as "priority".
+            IMPORTANT RULES (in priority order):
+            1. The user's ownership context is the HIGHEST priority signal. It describes what they \
+            actually care about, including any exclusions or narrowing of broad CODEOWNERS rules. \
+            If the user says they only care about a subset of a directory, respect that.
+            2. Focus on FILE PATHS changed, not the PR title or description.
+            3. The CODEOWNERS file shows formal ownership but may be overly broad. A user listed \
+            on a broad directory pattern may not actually need to review all changes there. \
+            Always defer to the user's ownership context over CODEOWNERS.
 
             Respond with JSON only: {"category": "priority"|"low", "reason": "<one sentence>"}
             """
