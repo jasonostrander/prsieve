@@ -5,23 +5,29 @@ import UserNotifications
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     private var notifiedPRIDs: Set<String> = []
-    private var authorized = false
+    private(set) var authorized = false
 
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
     }
 
-    func requestAuthorization() {
-        Task {
-            do {
-                let granted = try await UNUserNotificationCenter.current()
-                    .requestAuthorization(options: [.alert, .sound])
-                authorized = granted
-            } catch {
-                authorized = false
+    func requestAuthorization() async {
+        do {
+            let granted = try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
+            authorized = granted
+            if !granted {
+                print("[Notifications] Authorization denied by user")
             }
+        } catch {
+            print("[Notifications] Authorization error: \(error)")
+            authorized = false
         }
+
+        // Also check current settings to see what macOS actually allows
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        print("[Notifications] Authorization status: \(settings.authorizationStatus.rawValue), alert: \(settings.alertSetting.rawValue)")
     }
 
     /// Send notifications for new priority PRs with passing CI.
@@ -56,7 +62,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             trigger: nil  // deliver immediately
         )
 
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                print("[Notifications] Failed to deliver: \(error)")
+            }
+        }
     }
 
     // MARK: - UNUserNotificationCenterDelegate

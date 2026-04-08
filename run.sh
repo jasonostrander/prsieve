@@ -20,5 +20,8 @@ cp "$BUILD_DIR/$APP_NAME" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 cp resources/Info.plist "$BUNDLE_DIR/Contents/Info.plist"
 cp resources/AppIcon.icns "$BUNDLE_DIR/Contents/Resources/AppIcon.icns"
 
+# Ad-hoc code sign (required for notifications and other entitlements)
+codesign --force --sign - "$BUNDLE_DIR"
+
 # Launch
 open "$BUNDLE_DIR"
