@@ -90,13 +90,16 @@ actor CategorizationService {
         let systemPrompt = """
             You are a PR triage assistant. Categorize the PR into exactly one of two tiers:
 
-            - "priority": The PR is directly relevant to the user — it touches code they own, \
-            maintain, or have domain expertise in. The user should review this.
-            - "low": The PR is not directly relevant. The user is likely assigned only through \
-            fallthrough codeownership (catch-all patterns) or broad team ownership.
+            - "priority": ANY of the changed files are in code the user owns, maintains, or has \
+            domain expertise in. Even if the PR's primary purpose is unrelated, if it modifies files \
+            in the user's area, they need to review those changes. Also priority if the user is a \
+            direct codeowner (not a fallthrough/catch-all pattern) based on the CODEOWNERS file.
+            - "low": None of the changed files are in the user's area of ownership. The user is \
+            likely assigned only through fallthrough codeownership (catch-all patterns like * or \
+            broad team patterns).
 
-            Consider the PR age when categorizing. Older PRs (>7 days) are less likely to be priority \
-            unless they are clearly in the user's domain.
+            IMPORTANT: Focus on the FILE PATHS changed, not the PR title or description. If even \
+            one file is in a directory or module the user owns, categorize as "priority".
 
             Respond with JSON only: {"category": "priority"|"low", "reason": "<one sentence>"}
             """

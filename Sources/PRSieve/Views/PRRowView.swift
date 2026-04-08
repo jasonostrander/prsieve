@@ -65,6 +65,13 @@ struct PRCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .opacity(pr.isMerged ? 0.5 : 1.0)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
         .contextMenu {
             Button("Open in Browser") {
                 NSWorkspace.shared.open(pr.htmlURL)

@@ -106,7 +106,7 @@ struct DashboardView: View {
                         viewModel.toggleFlag(prID: pr.id)
                     }
                 )
-                .onTapGesture(count: 2) {
+                .onTapGesture {
                     NSWorkspace.shared.open(pr.htmlURL)
                 }
             }

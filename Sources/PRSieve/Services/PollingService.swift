@@ -36,8 +36,8 @@ actor PollingService {
             existingByID[pr.id] = pr
         }
 
-        // Cache CODEOWNERS per repo
-        var codeownersCache: [String: String?] = [:]
+        // Cache CODEOWNERS per repo (empty string = confirmed no CODEOWNERS file)
+        var codeownersCache: [String: String] = [:]
 
         var allPRs: [PullRequest] = []
 
@@ -50,10 +50,11 @@ actor PollingService {
                 if let cached {
                     codeownersCache[repo] = cached
                 } else {
-                    let fetched = try? await githubClient.fetchCodeowners(repo: repo)
-                    codeownersCache[repo] = fetched
-                    if let fetched {
+                    if let fetched = try? await githubClient.fetchCodeowners(repo: repo) {
+                        codeownersCache[repo] = fetched
                         try? await persistence.saveCodeowners(fetched, forRepo: repo)
+                    } else {
+                        codeownersCache[repo] = "" // mark as checked
                     }
                 }
             }
@@ -88,9 +89,10 @@ actor PollingService {
 
                 // Categorize if not already overridden
                 if !pr.categoryOverridden {
+                    let codeowners = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
                     let result = await categorizationService.categorize(
                         pr: pr,
-                        codeowners: codeownersCache[repo] ?? nil,
+                        codeowners: codeowners,
                         userContext: settings.codeownerContext
                     )
                     pr.category = result.category

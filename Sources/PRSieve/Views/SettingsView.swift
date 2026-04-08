@@ -77,13 +77,16 @@ struct SettingsView: View {
                     .help("Model name (e.g., gpt-4o-mini)")
             }
 
-            Section("Your Code Ownership Context") {
+            Section {
+                Text("Describe what code you own or maintain. Focus on your areas of responsibility — the LLM handles categorization logic and PR age separately.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 4)
                 TextEditor(text: $viewModel.settings.codeownerContext)
                     .frame(minHeight: 100)
                     .font(.body.monospaced())
-                Text("Describe which code you own, maintain, or have expertise in. This helps the LLM categorize PRs accurately.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Your Code Ownership Context")
             }
         }
         .formStyle(.grouped)
