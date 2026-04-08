@@ -164,6 +164,8 @@ struct PRCardView: View {
                 .fontWeight(.medium)
         }
         .foregroundStyle(foreground)
+        .lineLimit(1)
+        .fixedSize()
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(background)
