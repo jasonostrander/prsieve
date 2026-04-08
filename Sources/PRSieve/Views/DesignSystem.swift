@@ -61,6 +61,22 @@ extension Color {
                                    dark:  .init(h: 0, s: 0.00, b: 0.16))
     static let noiseAccent = Color(light: .init(h: 0, s: 0.00, b: 0.60),
                                    dark:  .init(h: 0, s: 0.00, b: 0.45))
+
+    // Status pills — high contrast against any card background
+    static let pillApprovedText  = Color(light: .init(h: 145, s: 0.70, b: 0.35),
+                                         dark:  .init(h: 145, s: 0.55, b: 0.75))
+    static let pillApprovedBg    = Color(light: .init(h: 145, s: 0.20, b: 0.92),
+                                         dark:  .init(h: 145, s: 0.30, b: 0.25))
+
+    static let pillChangesText   = Color(light: .init(h: 0,   s: 0.65, b: 0.55),
+                                         dark:  .init(h: 0,   s: 0.50, b: 0.80))
+    static let pillChangesBg     = Color(light: .init(h: 0,   s: 0.18, b: 0.94),
+                                         dark:  .init(h: 0,   s: 0.30, b: 0.25))
+
+    static let pillCommentedText = Color(light: .init(h: 35,  s: 0.70, b: 0.50),
+                                         dark:  .init(h: 35,  s: 0.50, b: 0.75))
+    static let pillCommentedBg   = Color(light: .init(h: 35,  s: 0.18, b: 0.93),
+                                         dark:  .init(h: 35,  s: 0.25, b: 0.25))
 }
 
 // MARK: - Adaptive color helper

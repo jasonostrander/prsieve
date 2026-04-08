@@ -105,8 +105,19 @@ struct PRCardView: View {
     }
 
     private var reviewSummary: some View {
-        HStack(spacing: 4) {
-            // Reviewer avatars with status
+        HStack(spacing: 6) {
+            reviewStatusPill
+
+            if pr.humanCommentCount > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "text.bubble")
+                        .font(.caption2)
+                    Text("\(pr.humanCommentCount)")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+            }
+
             if !pr.reviewers.isEmpty {
                 HStack(spacing: -4) {
                     ForEach(pr.reviewers.prefix(5)) { reviewer in
@@ -119,18 +130,51 @@ struct PRCardView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            // Comment count
-            if pr.humanCommentCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "text.bubble")
-                        .font(.caption2)
-                    Text("\(pr.humanCommentCount)")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-            }
         }
+    }
+
+    @ViewBuilder
+    private var reviewStatusPill: some View {
+        let approvals = pr.reviewers.filter { $0.state == .approved }.count
+        let changesRequested = pr.reviewers.contains { $0.state == .changesRequested }
+
+        if changesRequested {
+            statusPill(
+                icon: "exclamationmark.circle.fill",
+                text: "Changes requested",
+                foreground: .pillChangesText,
+                background: .pillChangesBg
+            )
+        } else if approvals > 0 {
+            statusPill(
+                icon: "checkmark.circle.fill",
+                text: approvals == 1 ? "Approved" : "\(approvals) approved",
+                foreground: .pillApprovedText,
+                background: .pillApprovedBg
+            )
+        } else if pr.reviewers.contains(where: { $0.state == .commented }) {
+            statusPill(
+                icon: "bubble.left.fill",
+                text: "Reviewed",
+                foreground: .pillCommentedText,
+                background: .pillCommentedBg
+            )
+        }
+    }
+
+    private func statusPill(icon: String, text: String, foreground: Color, background: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+            Text(text)
+                .font(.caption2)
+                .fontWeight(.medium)
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(background)
+        .clipShape(Capsule())
     }
 
     private var ageColor: Color {
