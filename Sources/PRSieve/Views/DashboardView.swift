@@ -93,24 +93,39 @@ struct DashboardView: View {
     }
 
     private func categorySection(_ category: PRCategory, prs: [PullRequest]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            CategoryHeaderView(category: category, count: prs.count)
+        let isCollapsed = viewModel.collapsedSections.contains(category)
 
-            ForEach(prs) { pr in
-                PRCardView(
-                    pr: pr,
-                    onOverrideCategory: { cat in
-                        viewModel.overrideCategory(prID: pr.id, to: cat)
-                    },
-                    onToggleFlag: {
-                        viewModel.toggleFlag(prID: pr.id)
-                    }
+        return VStack(alignment: .leading, spacing: 6) {
+            CategoryHeaderView(
+                category: category,
+                count: prs.count,
+                isCollapsed: isCollapsed,
+                onToggle: { viewModel.toggleSection(category) }
+            )
+
+            if isCollapsed {
+                CollapsedSectionPreview(
+                    prs: prs,
+                    summary: viewModel.categorySummaries[category]
                 )
-                .onTapGesture {
-                    NSWorkspace.shared.open(pr.htmlURL)
+            } else {
+                ForEach(prs) { pr in
+                    PRCardView(
+                        pr: pr,
+                        onOverrideCategory: { cat in
+                            viewModel.overrideCategory(prID: pr.id, to: cat)
+                        },
+                        onToggleFlag: {
+                            viewModel.toggleFlag(prID: pr.id)
+                        }
+                    )
+                    .onTapGesture {
+                        NSWorkspace.shared.open(pr.htmlURL)
+                    }
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: isCollapsed)
     }
 
     private var emptyState: some View {

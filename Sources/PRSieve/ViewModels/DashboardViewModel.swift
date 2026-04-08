@@ -10,9 +10,14 @@ final class DashboardViewModel {
     var searchText = ""
     var showMerged = false
 
+    var collapsedSections: Set<PRCategory> = []
+    var categorySummaries: [PRCategory: String] = [:]
+
     private var pollingService: PollingService?
     private(set) var persistence: PersistenceService?
+    private(set) var llmProvider: (any LLMProvider)?
     private var pollingTask: Task<Void, Never>?
+    private var summaryTasks: [PRCategory: Task<Void, Never>] = [:]
 
     var priority: [PullRequest] { filtered(.priority) }
     var low: [PullRequest] { filtered(.low) }
@@ -45,6 +50,10 @@ final class DashboardViewModel {
         self.pollingService = pollingService
     }
 
+    func updateLLMProvider(_ provider: any LLMProvider) {
+        self.llmProvider = provider
+    }
+
     func loadCached() async {
         guard let persistence else { return }
         pullRequests = await persistence.loadPullRequests()
@@ -59,6 +68,11 @@ final class DashboardViewModel {
             pullRequests = try await pollingService.refresh()
             lastRefresh = Date()
             isInitialLoad = false
+            invalidateSummaries()
+            // Re-generate summaries for collapsed sections
+            for category in collapsedSections {
+                generateSummaryIfNeeded(for: category)
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -78,6 +92,57 @@ final class DashboardViewModel {
     func stopPolling() {
         pollingTask?.cancel()
         pollingTask = nil
+    }
+
+    func toggleSection(_ category: PRCategory) {
+        if collapsedSections.contains(category) {
+            collapsedSections.remove(category)
+        } else {
+            collapsedSections.insert(category)
+            generateSummaryIfNeeded(for: category)
+        }
+    }
+
+    func generateSummaryIfNeeded(for category: PRCategory) {
+        guard categorySummaries[category] == nil else { return }
+        guard let llmProvider else { return }
+
+        let prs = filtered(category)
+        guard !prs.isEmpty else { return }
+
+        summaryTasks[category]?.cancel()
+        summaryTasks[category] = Task {
+            let summary = await Self.generateSummary(prs: prs, category: category, llm: llmProvider)
+            if !Task.isCancelled {
+                categorySummaries[category] = summary
+            }
+        }
+    }
+
+    func invalidateSummaries() {
+        for task in summaryTasks.values { task.cancel() }
+        summaryTasks.removeAll()
+        categorySummaries.removeAll()
+    }
+
+    private static func generateSummary(prs: [PullRequest], category: PRCategory, llm: any LLMProvider) async -> String {
+        let prList = prs.prefix(15).map { "- \($0.title) (\($0.repoShortName) by \($0.author))" }.joined(separator: "\n")
+        let prompt = """
+            Summarize these \(prs.count) \(category.displayName) PRs in one brief sentence (under 80 chars). \
+            Focus on the themes or areas of code being changed. No preamble, just the summary.
+
+            \(prList)
+            """
+
+        do {
+            let result = try await llm.complete(
+                systemPrompt: "You write ultra-concise PR summaries. One sentence, no markdown.",
+                userPrompt: prompt
+            )
+            return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return "\(prs.count) pull requests"
+        }
     }
 
     func overrideCategory(prID: String, to category: PRCategory) {

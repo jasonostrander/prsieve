@@ -102,6 +102,7 @@ final class AppState {
         )
 
         viewModel.updatePollingService(pollingService)
+        viewModel.updateLLMProvider(llmClient!)
 
         // Start polling if configured
         if !settings.githubUsername.isEmpty && !githubToken.isEmpty {
