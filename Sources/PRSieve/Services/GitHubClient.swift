@@ -114,11 +114,13 @@ actor GitHubClient {
         async let reviewsData = fetch(repoURL(repo, path: "/pulls/\(number)/reviews"))
         async let reviewCommentsData = fetch(repoURL(repo, path: "/pulls/\(number)/comments"))
         async let issueCommentsData = fetch(repoURL(repo, path: "/issues/\(number)/comments"))
+        async let statusResult = fetchCombinedStatus(repo: repo, ref: ghPR.head.sha)
 
         let files = try decoder.decode([GitHubFile].self, from: try await filesData)
         let reviews = try decoder.decode([GitHubReview].self, from: try await reviewsData)
         let reviewComments = try decoder.decode([GitHubComment].self, from: try await reviewCommentsData)
         let issueComments = try decoder.decode([GitHubComment].self, from: try await issueCommentsData)
+        let buildStatus = try await statusResult
 
         let reviewers = Self.perReviewerStatus(from: reviews)
 
@@ -158,12 +160,30 @@ actor GitHubClient {
             category: .low,
             categoryOverridden: false,
             categoryReason: "",
-            buildStatus: nil,
+            buildStatus: buildStatus,
             isMerged: ghPR.merged ?? false,
             isClosed: ghPR.state == "closed",
             isFlagged: false,
             lastCategorizedAt: nil
         )
+    }
+
+    // MARK: - Combined CI Status
+
+    func fetchCombinedStatus(repo: String, ref: String) async throws -> BuildStatus {
+        let url = repoURL(repo, path: "/commits/\(ref)/status")
+        do {
+            let data = try await fetch(url)
+            let status = try decoder.decode(GitHubCombinedStatus.self, from: data)
+            switch status.state {
+            case "success": return .passed
+            case "failure", "error": return .failed
+            case "pending": return status.totalCount == 0 ? .unknown : .running
+            default: return .unknown
+            }
+        } catch {
+            return .unknown
+        }
     }
 
     // MARK: - CODEOWNERS
@@ -346,4 +366,10 @@ struct GitHubComment: Decodable, Sendable {
 struct GitHubContentFile: Decodable, Sendable {
     let content: String?
     let encoding: String?
+}
+
+// Combined commit status
+struct GitHubCombinedStatus: Decodable, Sendable {
+    let state: String  // "success", "failure", "error", "pending"
+    let totalCount: Int
 }

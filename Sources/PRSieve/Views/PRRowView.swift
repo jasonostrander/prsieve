@@ -41,14 +41,6 @@ struct PRCardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if let status = pr.buildStatus, status != .unknown {
-                    Text("·")
-                        .foregroundStyle(.quaternary)
-                    Image(systemName: status.symbol)
-                        .font(.caption2)
-                        .foregroundStyle(buildStatusColor(status))
-                }
-
                 if pr.isDraft {
                     Text("·")
                         .foregroundStyle(.quaternary)
@@ -106,6 +98,7 @@ struct PRCardView: View {
 
     private var reviewSummary: some View {
         HStack(spacing: 6) {
+            buildStatusPill
             reviewStatusPill
 
             if pr.humanCommentCount > 0 {
@@ -177,20 +170,40 @@ struct PRCardView: View {
         .clipShape(Capsule())
     }
 
+    @ViewBuilder
+    private var buildStatusPill: some View {
+        switch pr.buildStatus {
+        case .passed:
+            statusPill(
+                icon: "checkmark.circle.fill",
+                text: "CI passed",
+                foreground: .pillCIPassedText,
+                background: .pillCIPassedBg
+            )
+        case .failed:
+            statusPill(
+                icon: "xmark.circle.fill",
+                text: "CI failing",
+                foreground: .pillCIFailedText,
+                background: .pillCIFailedBg
+            )
+        case .running:
+            statusPill(
+                icon: "arrow.triangle.2.circlepath",
+                text: "CI running",
+                foreground: .pillCIRunningText,
+                background: .pillCIRunningBg
+            )
+        default:
+            EmptyView()
+        }
+    }
+
     private var ageColor: Color {
         let hours = pr.age / 3600
         if hours > 72 { return .red.opacity(0.8) }
         if hours > 24 { return .orange.opacity(0.8) }
         return .secondary
-    }
-
-    private func buildStatusColor(_ status: BuildStatus) -> Color {
-        switch status {
-        case .passed: .green
-        case .failed: .red.opacity(0.8)
-        case .running: .orange
-        case .unknown: .gray
-        }
     }
 }
 
