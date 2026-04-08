@@ -190,7 +190,7 @@ actor GitHubClient {
 
     // MARK: - Review Status Logic
 
-    private static func latestReviewStatus(from reviews: [GitHubReview]) -> ReviewStatus {
+    static func latestReviewStatus(from reviews: [GitHubReview]) -> ReviewStatus {
         // Get the most recent non-comment review
         let meaningful = reviews.filter { $0.state != "COMMENTED" }
         guard let latest = meaningful.last else { return .pending }
@@ -203,7 +203,7 @@ actor GitHubClient {
     }
 
     /// Build per-reviewer status from all reviews, taking each reviewer's latest state.
-    private static func perReviewerStatus(from reviews: [GitHubReview]) -> [ReviewerInfo] {
+    static func perReviewerStatus(from reviews: [GitHubReview]) -> [ReviewerInfo] {
         // Filter out bots
         let humanReviews = reviews.filter { !isBot($0.user.login) }
 
@@ -231,7 +231,7 @@ actor GitHubClient {
             }
     }
 
-    private static func isBot(_ login: String) -> Bool {
+    static func isBot(_ login: String) -> Bool {
         let lowered = login.lowercased()
         return lowered.hasSuffix("[bot]")
             || lowered.hasSuffix("-bot")

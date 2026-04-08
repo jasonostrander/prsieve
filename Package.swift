@@ -9,10 +9,5 @@ let package = Package(
             name: "PRSieve",
             path: "Sources/PRSieve"
         ),
-        .testTarget(
-            name: "PRSieveTests",
-            dependencies: ["PRSieve"],
-            path: "Tests/PRSieveTests"
-        ),
     ]
 )

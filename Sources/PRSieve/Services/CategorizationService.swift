@@ -1,9 +1,9 @@
 import Foundation
 
 actor CategorizationService {
-    private let llmClient: LLMClient
+    private let llmClient: any LLMProvider
 
-    init(llmClient: LLMClient) {
+    init(llmClient: any LLMProvider) {
         self.llmClient = llmClient
     }
 
@@ -24,12 +24,12 @@ actor CategorizationService {
         }
 
         // Noise: release PRs
-        if isReleasePR(pr) {
+        if Self.isReleasePR(pr) {
             return CategorizationResult(category: .noise, reason: "Release PR")
         }
 
         // Noise: strings/translations PRs
-        if isStringsPR(pr) {
+        if Self.isStringsPR(pr) {
             return CategorizationResult(category: .noise, reason: "Strings/translations PR")
         }
 
@@ -51,7 +51,7 @@ actor CategorizationService {
 
     // MARK: - Pre-filter helpers
 
-    private func isReleasePR(_ pr: PullRequest) -> Bool {
+    static func isReleasePR(_ pr: PullRequest) -> Bool {
         let title = pr.title.lowercased()
         return title.hasPrefix("[releases]")
             || title.hasPrefix("[release]")
@@ -59,19 +59,19 @@ actor CategorizationService {
             || (pr.author.contains("machine-user") && title.contains("release"))
     }
 
-    private func isStringsPR(_ pr: PullRequest) -> Bool {
+    static func isStringsPR(_ pr: PullRequest) -> Bool {
         let title = pr.title.lowercased()
         if title.contains("strings") || title.contains("translations") || title.contains("l10n") {
             return true
         }
         // All files are string resources
-        if !pr.filesChanged.isEmpty && pr.filesChanged.allSatisfy({ isStringFile($0) }) {
+        if !pr.filesChanged.isEmpty && pr.filesChanged.allSatisfy({ Self.isStringFile($0) }) {
             return true
         }
         return false
     }
 
-    private func isStringFile(_ path: String) -> Bool {
+    static func isStringFile(_ path: String) -> Bool {
         let p = path.lowercased()
         return p.contains("/values") && p.hasSuffix("strings.xml")
             || p.hasSuffix(".strings")

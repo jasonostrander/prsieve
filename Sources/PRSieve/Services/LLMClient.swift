@@ -1,6 +1,10 @@
 import Foundation
 
-actor LLMClient {
+protocol LLMProvider: Sendable {
+    func complete(systemPrompt: String, userPrompt: String) async throws -> String
+}
+
+actor LLMClient: LLMProvider {
     private let session = URLSession(configuration: .default)
     private var endpoint: String
     private var apiKey: String
