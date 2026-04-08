@@ -16,18 +16,25 @@ struct DashboardView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-
                     Button {
                         Task { await viewModel.refresh() }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        ZStack {
+                            Image(systemName: "arrow.clockwise")
+                                .opacity(viewModel.isLoading ? 0 : 1)
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .opacity(viewModel.isLoading ? 1 : 0)
+                        }
+                        .frame(width: 16, height: 16)
                     }
                     .help("Refresh now")
                     .disabled(viewModel.isLoading)
+
+                    Toggle(isOn: $viewModel.showReadyToMerge) {
+                        Image(systemName: "checkmark.diamond")
+                    }
+                    .help("Show only PRs with passing CI")
 
                     Toggle(isOn: $viewModel.showMerged) {
                         Image(systemName: "archivebox")

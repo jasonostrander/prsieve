@@ -9,6 +9,7 @@ final class DashboardViewModel {
     var error: String?
     var searchText = ""
     var showMerged = false
+    var showReadyToMerge = false
 
     var collapsedSections: Set<PRCategory> = []
     var categorySummaries: [PRCategory: String] = [:]
@@ -29,6 +30,7 @@ final class DashboardViewModel {
         pullRequests
             .filter { $0.category == category }
             .filter { showMerged || !$0.isMerged }
+            .filter { !showReadyToMerge || $0.buildStatus == .passed }
             .filter { searchText.isEmpty || matchesSearch($0) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
