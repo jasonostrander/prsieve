@@ -4,7 +4,15 @@ enum ReviewStatus: String, Codable, Sendable {
     case pending
     case approved
     case changesRequested = "changes_requested"
+    case commented
     case dismissed
+}
+
+struct ReviewerInfo: Codable, Sendable, Identifiable {
+    var id: String { login }
+    let login: String
+    let avatarURL: URL?
+    let state: ReviewStatus
 }
 
 struct PullRequest: Identifiable, Codable, Sendable {
@@ -27,6 +35,8 @@ struct PullRequest: Identifiable, Codable, Sendable {
     let filesChanged: [String]
 
     var reviewStatus: ReviewStatus
+    var reviewers: [ReviewerInfo]
+    var humanCommentCount: Int
     var isRequestedReviewer: Bool
     var isMentioned: Bool
     var category: PRCategory

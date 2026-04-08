@@ -96,6 +96,21 @@ actor GitHubClient {
         let reviews = try decoder.decode([GitHubReview].self, from: reviewsData)
 
         let reviewStatus = Self.latestReviewStatus(from: reviews)
+        let reviewers = Self.perReviewerStatus(from: reviews)
+
+        // Fetch review comments (inline code comments) and issue comments
+        let reviewCommentsURL = repoURL(repo, path: "/pulls/\(number)/comments")
+        let reviewCommentsData = try await fetch(reviewCommentsURL)
+        let reviewComments = try decoder.decode([GitHubComment].self, from: reviewCommentsData)
+
+        let issueCommentsURL = repoURL(repo, path: "/issues/\(number)/comments")
+        let issueCommentsData = try await fetch(issueCommentsURL)
+        let issueComments = try decoder.decode([GitHubComment].self, from: issueCommentsData)
+
+        let humanCommentCount = (reviewComments + issueComments)
+            .filter { !Self.isBot($0.user.login) }
+            .filter { $0.user.login != ghPR.user.login } // exclude PR author
+            .count
 
         return PullRequest(
             repoFullName: repo,
@@ -113,6 +128,8 @@ actor GitHubClient {
             body: String(ghPR.body?.prefix(1000) ?? ""),
             filesChanged: files.map(\.filename),
             reviewStatus: reviewStatus,
+            reviewers: reviewers,
+            humanCommentCount: humanCommentCount,
             isRequestedReviewer: false, // will be set by caller
             isMentioned: false, // will be determined separately
             category: .low, // default, will be categorized
@@ -183,6 +200,47 @@ actor GitHubClient {
         case "DISMISSED": return .dismissed
         default: return .pending
         }
+    }
+
+    /// Build per-reviewer status from all reviews, taking each reviewer's latest state.
+    private static func perReviewerStatus(from reviews: [GitHubReview]) -> [ReviewerInfo] {
+        // Filter out bots
+        let humanReviews = reviews.filter { !isBot($0.user.login) }
+
+        // Group by reviewer, keep latest review per person
+        var latestByLogin: [String: GitHubReview] = [:]
+        for review in humanReviews {
+            latestByLogin[review.user.login] = review // later reviews overwrite earlier
+        }
+
+        return latestByLogin.values
+            .sorted { $0.user.login < $1.user.login }
+            .map { review in
+                let state: ReviewStatus = switch review.state {
+                case "APPROVED": .approved
+                case "CHANGES_REQUESTED": .changesRequested
+                case "COMMENTED": .commented
+                case "DISMISSED": .dismissed
+                default: .pending
+                }
+                return ReviewerInfo(
+                    login: review.user.login,
+                    avatarURL: URL(string: review.user.avatarUrl),
+                    state: state
+                )
+            }
+    }
+
+    private static func isBot(_ login: String) -> Bool {
+        let lowered = login.lowercased()
+        return lowered.hasSuffix("[bot]")
+            || lowered.hasSuffix("-bot")
+            || lowered.contains("machine-user")
+            || lowered == "dependabot"
+            || lowered == "renovate"
+            || lowered == "codecov"
+            || lowered == "sonarcloud"
+            || lowered == "github-actions"
     }
 }
 
