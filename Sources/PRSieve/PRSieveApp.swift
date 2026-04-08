@@ -2,34 +2,15 @@ import SwiftUI
 
 @main
 struct PRSieveApp: App {
-    @State private var viewModel = DashboardViewModel()
-    @State private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            DashboardView(viewModel: viewModel, onSettingsDismissed: {
-                    Task { await appState.reinitialize(viewModel: viewModel) }
-                })
-                .frame(minWidth: 700, minHeight: 500)
-                .task {
-                    await appState.initialize(viewModel: viewModel)
-                }
-                .onDisappear {
-                    viewModel.stopPolling()
-                }
-        }
-        .windowResizability(.contentMinSize)
-        .commands {
-            CommandGroup(replacing: .newItem) { }
-        }
-
         Settings {
-            if let persistence = viewModel.persistence {
+            if let persistence = appDelegate.viewModel.persistence {
                 SettingsView(viewModel: SettingsViewModel(persistence: persistence))
                     .onDisappear {
-                        // Reinitialize services when settings close, picking up new tokens
                         Task {
-                            await appState.reinitialize(viewModel: viewModel)
+                            await appDelegate.appState.reinitialize(viewModel: appDelegate.viewModel)
                         }
                     }
             } else {
@@ -39,6 +20,33 @@ struct PRSieveApp: App {
         }
     }
 }
+
+// MARK: - App Delegate
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let viewModel = DashboardViewModel()
+    let appState = AppState()
+    private var statusBarController: StatusBarController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusBarController = StatusBarController(viewModel: viewModel)
+        statusBarController?.onOpenSettings = {
+            // Open the Settings scene via standard Cmd+, action
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+
+        Task {
+            await appState.initialize(viewModel: viewModel)
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
+// MARK: - App State
 
 @MainActor @Observable
 final class AppState {
@@ -73,7 +81,6 @@ final class AppState {
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""
 
-        // Create or update clients
         if let existing = githubClient {
             await existing.updateToken(githubToken)
         } else {
@@ -104,7 +111,6 @@ final class AppState {
         viewModel.updatePollingService(pollingService)
         viewModel.updateLLMProvider(llmClient!)
 
-        // Start polling if configured
         if !settings.githubUsername.isEmpty && !githubToken.isEmpty {
             viewModel.startPolling(intervalSeconds: settings.pollingIntervalSeconds)
         }
