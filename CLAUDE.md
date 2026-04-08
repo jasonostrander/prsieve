@@ -64,6 +64,14 @@ Configured in-app (gear icon or Cmd+,):
 - **Code ownership context**: Free-text description of what code you own (used in LLM prompt)
 - **Polling interval**: 1-15 minutes
 
+## Testing
+
+- **Always add tests** for new features and bug fixes.
+- **Run `./test.sh`** after any code changes to verify nothing is broken.
+- Tests use a lightweight custom runner (no XCTest/Xcode needed) in `Tests/PRSieveTests/PRSieveTests.swift`.
+- Use `MockLLMClient` for testing LLM-dependent code paths.
+- Test helpers `makePR` and `makeReview` simplify test data creation.
+
 ## Data Storage
 
 All in `~/Library/Application Support/PRSieve/`:
