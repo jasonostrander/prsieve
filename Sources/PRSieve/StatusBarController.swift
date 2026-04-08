@@ -37,7 +37,7 @@ final class StatusBarController: NSObject {
 
     private func updateIcon() {
         let hasPriority = withObservationTracking {
-            !viewModel.priority.isEmpty
+            viewModel.priority.contains { $0.buildStatus == .passed }
         } onChange: { [weak self] in
             Task { @MainActor in self?.updateIcon() }
         }

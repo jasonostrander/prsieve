@@ -358,6 +358,50 @@ func runAllTests() async {
         t.checkEqual(decoded.hideDraftPRs, false, "hideDraftPRs can be set to false")
     }
 
+    // --- Priority + CI indicator logic ---
+    // Status bar icon highlights only when a priority PR has passing CI
+
+    do {
+        let prs = [makePR()]  // default: category .low, no build status
+        let hasPriority = prs.filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        t.check(!hasPriority, "low PRs don't trigger priority indicator")
+    }
+
+    do {
+        var pr = makePR()
+        pr.category = .priority
+        pr.buildStatus = .failed
+        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        t.check(!hasPriority, "priority PR with failed CI doesn't trigger indicator")
+    }
+
+    do {
+        var pr = makePR()
+        pr.category = .priority
+        pr.buildStatus = nil
+        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        t.check(!hasPriority, "priority PR with no CI doesn't trigger indicator")
+    }
+
+    do {
+        var pr = makePR()
+        pr.category = .priority
+        pr.buildStatus = .passed
+        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        t.check(hasPriority, "priority PR with passing CI triggers indicator")
+    }
+
+    do {
+        var pr1 = makePR()
+        pr1.category = .priority
+        pr1.buildStatus = .failed
+        var pr2 = makePR()
+        pr2.category = .priority
+        pr2.buildStatus = .passed
+        let hasPriority = [pr1, pr2].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        t.check(hasPriority, "mixed priority PRs: one passing triggers indicator")
+    }
+
     // --- PullRequest Model ---
 
     do {
