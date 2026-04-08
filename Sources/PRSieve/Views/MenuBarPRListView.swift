@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MenuBarPRListView: View {
     @Bindable var viewModel: DashboardViewModel
-    @State private var showSettings = false
+    var onOpenSettings: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +56,7 @@ struct MenuBarPRListView: View {
             // Footer
             HStack {
                 Button {
-                    showSettings = true
+                    onOpenSettings?()
                 } label: {
                     Image(systemName: "gearshape")
                     Text("Settings")
@@ -85,11 +85,6 @@ struct MenuBarPRListView: View {
         }
         .frame(width: 420, height: 580)
         .focusEffectDisabled()
-        .sheet(isPresented: $showSettings) {
-            if let persistence = viewModel.persistence {
-                SettingsView(viewModel: SettingsViewModel(persistence: persistence))
-            }
-        }
     }
 
     private var subtitleText: String {

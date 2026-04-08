@@ -20,7 +20,10 @@ final class StatusBarController: NSObject {
 
         super.init()
 
-        let content = MenuBarPRListView(viewModel: viewModel)
+        let content = MenuBarPRListView(viewModel: viewModel, onOpenSettings: { [weak self] in
+            self?.popover.performClose(nil)
+            self?.onOpenSettings?()
+        })
         popover.contentViewController = NSHostingController(rootView: content)
 
         if let button = statusItem.button {

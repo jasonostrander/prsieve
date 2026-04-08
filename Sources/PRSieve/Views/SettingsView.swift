@@ -106,6 +106,10 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Display") {
+                Toggle("Hide draft PRs", isOn: $viewModel.settings.hideDraftPRs)
+            }
+
             Section("Notifications") {
                 Toggle("Enable notifications for Must Review PRs", isOn: $viewModel.settings.notificationsEnabled)
             }

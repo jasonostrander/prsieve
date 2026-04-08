@@ -339,6 +339,25 @@ func runAllTests() async {
         t.checkEqual(pr.buildStatus, .failed, "buildStatus can be set to failed")
     }
 
+    // --- AppSettings: hideDraftPRs ---
+
+    do {
+        let defaults = AppSettings.default
+        t.checkEqual(defaults.hideDraftPRs, true, "hideDraftPRs defaults to true")
+    }
+
+    do {
+        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","llmEndpoint":"","llmModel":"gpt-4o-mini","codeownerContext":"","pollingIntervalSeconds":300,"notificationsEnabled":true}"#
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.hideDraftPRs, true, "hideDraftPRs defaults when missing from JSON")
+    }
+
+    do {
+        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","llmEndpoint":"","llmModel":"gpt-4o-mini","codeownerContext":"","pollingIntervalSeconds":300,"hideDraftPRs":false,"notificationsEnabled":true}"#
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.hideDraftPRs, false, "hideDraftPRs can be set to false")
+    }
+
     // --- PullRequest Model ---
 
     do {

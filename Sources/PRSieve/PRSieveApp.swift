@@ -5,18 +5,9 @@ struct PRSieveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
+        // Settings scene kept as a placeholder; actual settings window managed by AppDelegate
         Settings {
-            if let persistence = appDelegate.viewModel.persistence {
-                SettingsView(viewModel: SettingsViewModel(persistence: persistence))
-                    .onDisappear {
-                        Task {
-                            await appDelegate.appState.reinitialize(viewModel: appDelegate.viewModel)
-                        }
-                    }
-            } else {
-                ProgressView("Loading...")
-                    .frame(width: 400, height: 200)
-            }
+            EmptyView()
         }
     }
 }
@@ -24,20 +15,55 @@ struct PRSieveApp: App {
 // MARK: - App Delegate
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let viewModel = DashboardViewModel()
     let appState = AppState()
     private var statusBarController: StatusBarController?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusBarController = StatusBarController(viewModel: viewModel)
-        statusBarController?.onOpenSettings = {
-            // Open the Settings scene via standard Cmd+, action
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        statusBarController?.onOpenSettings = { [weak self] in
+            self?.openSettings()
         }
 
         Task {
             await appState.initialize(viewModel: viewModel)
+        }
+    }
+
+    func openSettings() {
+        // If window exists and is visible, just bring it forward
+        if let window = settingsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        guard let persistence = viewModel.persistence else { return }
+
+        let settingsVM = SettingsViewModel(persistence: persistence)
+        let settingsView = SettingsView(viewModel: settingsVM)
+            .frame(minWidth: 500, minHeight: 400)
+
+        let hostingController = NSHostingController(rootView: settingsView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "PRSieve Settings"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 550, height: 500))
+        window.center()
+        window.delegate = self
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        self.settingsWindow = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        settingsWindow = nil
+        Task {
+            await appState.reinitialize(viewModel: viewModel)
         }
     }
 
@@ -77,6 +103,7 @@ final class AppState {
 
     private func buildAndStartServices(viewModel: DashboardViewModel, persistence: PersistenceService) async {
         let settings = await persistence.loadSettings()
+        viewModel.hideDrafts = settings.hideDraftPRs
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""
