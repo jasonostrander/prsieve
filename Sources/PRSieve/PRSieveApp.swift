@@ -80,7 +80,7 @@ final class AppState {
     private var githubClient: GitHubClient?
     private var buildkiteClient: BuildkiteClient?
     private var llmClient: LLMClient?
-    private let notificationService = NotificationService()
+    private var notificationService: NotificationService?
 
     func initialize(viewModel: DashboardViewModel) async {
         guard persistence == nil else { return }
@@ -140,7 +140,10 @@ final class AppState {
         viewModel.updateLLMProvider(llmClient!)
 
         if settings.notificationsEnabled {
-            notificationService.requestAuthorization()
+            if notificationService == nil {
+                notificationService = NotificationService()
+            }
+            await notificationService!.requestAuthorization()
             viewModel.notificationService = notificationService
         } else {
             viewModel.notificationService = nil

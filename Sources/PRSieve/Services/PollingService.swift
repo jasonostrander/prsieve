@@ -7,6 +7,7 @@ actor PollingService {
     private let categorizationService: CategorizationService
     private var settings: AppSettings
     private var isPolling = false
+    private var parserCache: [String: CodeownersParser] = [:]
 
     init(
         persistence: PersistenceService,
@@ -69,9 +70,13 @@ actor PollingService {
             var prsForRepo: [PullRequest] = []
             var needsCategorization: [(Int, PullRequest)] = [] // (index, pr)
 
-            // Parse CODEOWNERS for this repo
-            let codeownersText = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
-            let parser = codeownersText.map { CodeownersParser(content: $0) }
+            // Use cached parser, or create one if CODEOWNERS content is available
+            let parser: CodeownersParser? = parserCache[repo] ?? {
+                guard let text = codeownersCache[repo], !text.isEmpty else { return nil }
+                let p = CodeownersParser(content: text)
+                parserCache[repo] = p
+                return p
+            }()
 
             for var pr in fetchedPRs {
                 pr.isRequestedReviewer = true

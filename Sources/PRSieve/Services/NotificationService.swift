@@ -2,6 +2,8 @@ import AppKit
 import Foundation
 import UserNotifications
 
+private let userInfoURLKey = "pr_url"
+
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     private var notifiedPRIDs: Set<String> = []
@@ -14,20 +16,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
 
     func requestAuthorization() async {
         do {
-            let granted = try await UNUserNotificationCenter.current()
+            authorized = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])
-            authorized = granted
-            if !granted {
-                print("[Notifications] Authorization denied by user")
-            }
         } catch {
-            print("[Notifications] Authorization error: \(error)")
             authorized = false
         }
-
-        // Also check current settings to see what macOS actually allows
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        print("[Notifications] Authorization status: \(settings.authorizationStatus.rawValue), alert: \(settings.alertSetting.rawValue)")
     }
 
     /// Send notifications for new priority PRs with passing CI.
@@ -54,31 +47,26 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         content.title = "PR Ready for Review"
         content.body = "\(pr.repoShortName)#\(pr.number): \(pr.title)"
         content.sound = .default
-        content.userInfo = ["url": pr.htmlURL.absoluteString]
+        content.userInfo = [userInfoURLKey: pr.htmlURL.absoluteString]
 
         let request = UNNotificationRequest(
             identifier: pr.id,
             content: content,
-            trigger: nil  // deliver immediately
+            trigger: nil
         )
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                print("[Notifications] Failed to deliver: \(error)")
-            }
-        }
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Handle notification click — open the PR URL in the browser.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        if let urlString = userInfo["url"] as? String, let url = URL(string: urlString) {
+        if let urlString = userInfo[userInfoURLKey] as? String, let url = URL(string: urlString) {
             DispatchQueue.main.async {
                 NSWorkspace.shared.open(url)
             }
@@ -86,7 +74,6 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
-    /// Show notifications even when app is in foreground.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
