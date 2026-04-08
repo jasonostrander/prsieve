@@ -93,7 +93,7 @@ struct DashboardView: View {
     }
 
     private func categorySection(_ category: PRCategory, prs: [PullRequest]) -> some View {
-        let isCollapsed = viewModel.collapsedSections.contains(category)
+        let isCollapsed = viewModel.collapsedSections.contains(category) && viewModel.searchText.isEmpty
 
         return VStack(alignment: .leading, spacing: 6) {
             CategoryHeaderView(
