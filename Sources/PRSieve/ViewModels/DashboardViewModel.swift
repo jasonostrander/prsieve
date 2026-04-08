@@ -18,6 +18,7 @@ final class DashboardViewModel {
     private var pollingService: PollingService?
     private(set) var persistence: PersistenceService?
     private(set) var llmProvider: (any LLMProvider)?
+    var notificationService: NotificationService?
     private var pollingTask: Task<Void, Never>?
     private var summaryTasks: [PRCategory: Task<Void, Never>] = [:]
 
@@ -73,6 +74,10 @@ final class DashboardViewModel {
             lastRefresh = Date()
             isInitialLoad = false
             invalidateSummaries()
+
+            // Send notifications for new priority PRs with passing CI
+            notificationService?.notifyIfNeeded(prs: pullRequests)
+            notificationService?.pruneNotified(currentPRIDs: Set(pullRequests.map(\.id)))
             // Re-generate summaries for collapsed sections
             for category in collapsedSections {
                 generateSummaryIfNeeded(for: category)

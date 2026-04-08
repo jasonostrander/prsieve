@@ -80,6 +80,7 @@ final class AppState {
     private var githubClient: GitHubClient?
     private var buildkiteClient: BuildkiteClient?
     private var llmClient: LLMClient?
+    private let notificationService = NotificationService()
 
     func initialize(viewModel: DashboardViewModel) async {
         guard persistence == nil else { return }
@@ -137,6 +138,13 @@ final class AppState {
 
         viewModel.updatePollingService(pollingService)
         viewModel.updateLLMProvider(llmClient!)
+
+        if settings.notificationsEnabled {
+            notificationService.requestAuthorization()
+            viewModel.notificationService = notificationService
+        } else {
+            viewModel.notificationService = nil
+        }
 
         if !settings.githubUsername.isEmpty && !githubToken.isEmpty {
             viewModel.startPolling(intervalSeconds: settings.pollingIntervalSeconds)

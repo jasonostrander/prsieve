@@ -111,7 +111,7 @@ struct SettingsView: View {
             }
 
             Section("Notifications") {
-                Toggle("Enable notifications for Must Review PRs", isOn: $viewModel.settings.notificationsEnabled)
+                Toggle("Notify when priority PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
             }
         }
         .formStyle(.grouped)

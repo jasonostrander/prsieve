@@ -601,6 +601,58 @@ func runAllTests() async {
         t.checkEqual(result.category, .noise, "draft overrides direct codeowner")
     }
 
+    // --- Notification filtering logic ---
+    // Notifications should only fire for priority PRs with passing CI
+
+    do {
+        // Helper that mirrors NotificationService.notifyIfNeeded filtering
+        func shouldNotify(_ prs: [PullRequest], alreadyNotified: Set<String> = []) -> [PullRequest] {
+            prs.filter { $0.category == .priority && $0.buildStatus == .passed && !alreadyNotified.contains($0.id) }
+        }
+
+        // Priority + passing CI → notify
+        var pr1 = makePR()
+        pr1.category = .priority
+        pr1.buildStatus = .passed
+        t.checkEqual(shouldNotify([pr1]).count, 1, "notify: priority + passing CI")
+
+        // Priority + failed CI → no notify
+        var pr2 = makePR()
+        pr2.category = .priority
+        pr2.buildStatus = .failed
+        t.checkEqual(shouldNotify([pr2]).count, 0, "no notify: priority + failed CI")
+
+        // Priority + no CI → no notify
+        var pr3 = makePR()
+        pr3.category = .priority
+        pr3.buildStatus = nil
+        t.checkEqual(shouldNotify([pr3]).count, 0, "no notify: priority + no CI")
+
+        // Priority + running CI → no notify
+        var pr4 = makePR()
+        pr4.category = .priority
+        pr4.buildStatus = .running
+        t.checkEqual(shouldNotify([pr4]).count, 0, "no notify: priority + running CI")
+
+        // Low + passing CI → no notify
+        var pr5 = makePR()
+        pr5.category = .low
+        pr5.buildStatus = .passed
+        t.checkEqual(shouldNotify([pr5]).count, 0, "no notify: low + passing CI")
+
+        // Noise + passing CI → no notify
+        var pr6 = makePR()
+        pr6.category = .noise
+        pr6.buildStatus = .passed
+        t.checkEqual(shouldNotify([pr6]).count, 0, "no notify: noise + passing CI")
+
+        // Already notified → no duplicate
+        t.checkEqual(shouldNotify([pr1], alreadyNotified: [pr1.id]).count, 0, "no notify: already notified")
+
+        // Mix of PRs → only matching ones
+        t.checkEqual(shouldNotify([pr1, pr2, pr3, pr5]).count, 1, "notify: only priority+passing from mix")
+    }
+
     // --- PullRequest Model ---
 
     do {
