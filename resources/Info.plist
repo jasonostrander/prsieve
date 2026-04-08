@@ -13,6 +13,8 @@
     <string>1.0</string>
     <key>CFBundleExecutable</key>
     <string>PRSieve</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

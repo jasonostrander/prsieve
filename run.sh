@@ -16,8 +16,9 @@ mkdir -p "$BUNDLE_DIR/Contents/Resources"
 # Copy binary
 cp "$BUILD_DIR/$APP_NAME" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 
-# Copy Info.plist
+# Copy Info.plist and icon
 cp resources/Info.plist "$BUNDLE_DIR/Contents/Info.plist"
+cp resources/AppIcon.icns "$BUNDLE_DIR/Contents/Resources/AppIcon.icns"
 
 # Launch
 open "$BUNDLE_DIR"
