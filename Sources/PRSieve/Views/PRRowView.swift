@@ -59,7 +59,6 @@ struct PRCardView: View {
 
                 Spacer()
 
-                // Review activity
                 reviewSummary
             }
         }
@@ -178,7 +177,6 @@ struct ReviewerAvatarView: View {
                     .stroke(statusBorderColor, lineWidth: 1.5)
             )
 
-            // Status badge
             statusBadge
                 .offset(x: 2, y: 2)
         }
@@ -195,45 +193,31 @@ struct ReviewerAvatarView: View {
             )
     }
 
+    private var statusConfig: (icon: String, color: Color, borderColor: Color, label: String)? {
+        switch reviewer.state {
+        case .approved: ("checkmark.circle.fill", .green, .green.opacity(0.5), "Approved")
+        case .changesRequested: ("xmark.circle.fill", .red, .red.opacity(0.5), "Changes requested")
+        case .commented: ("ellipsis.circle.fill", .orange, .orange.opacity(0.3), "Commented")
+        case .dismissed: nil
+        case .pending: nil
+        }
+    }
+
     @ViewBuilder
     private var statusBadge: some View {
-        switch reviewer.state {
-        case .approved:
-            Image(systemName: "checkmark.circle.fill")
+        if let config = statusConfig {
+            Image(systemName: config.icon)
                 .font(.system(size: 9))
-                .foregroundStyle(.green)
+                .foregroundStyle(config.color)
                 .background(Circle().fill(.white).frame(width: 7, height: 7))
-        case .changesRequested:
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(.red)
-                .background(Circle().fill(.white).frame(width: 7, height: 7))
-        case .commented:
-            Image(systemName: "ellipsis.circle.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(.orange)
-                .background(Circle().fill(.white).frame(width: 7, height: 7))
-        default:
-            EmptyView()
         }
     }
 
     private var statusBorderColor: Color {
-        switch reviewer.state {
-        case .approved: .green.opacity(0.5)
-        case .changesRequested: .red.opacity(0.5)
-        case .commented: .orange.opacity(0.3)
-        default: .clear
-        }
+        statusConfig?.borderColor ?? .clear
     }
 
     private var statusLabel: String {
-        switch reviewer.state {
-        case .approved: "Approved"
-        case .changesRequested: "Changes requested"
-        case .commented: "Commented"
-        case .dismissed: "Dismissed"
-        case .pending: "Pending"
-        }
+        statusConfig?.label ?? (reviewer.state == .dismissed ? "Dismissed" : "Pending")
     }
 }

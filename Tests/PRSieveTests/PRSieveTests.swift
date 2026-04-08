@@ -81,7 +81,6 @@ func makePR(
         baseBranch: "main",
         body: "Some description",
         filesChanged: filesChanged,
-        reviewStatus: .pending,
         reviewers: [],
         humanCommentCount: 0,
         isRequestedReviewer: isRequestedReviewer,

@@ -6,6 +6,17 @@ enum ReviewStatus: String, Codable, Sendable {
     case changesRequested = "changes_requested"
     case commented
     case dismissed
+
+    /// Map from GitHub API review state strings (e.g. "APPROVED") to our enum.
+    init(githubState: String) {
+        switch githubState {
+        case "APPROVED": self = .approved
+        case "CHANGES_REQUESTED": self = .changesRequested
+        case "COMMENTED": self = .commented
+        case "DISMISSED": self = .dismissed
+        default: self = .pending
+        }
+    }
 }
 
 struct ReviewerInfo: Codable, Sendable, Identifiable {
@@ -34,7 +45,6 @@ struct PullRequest: Identifiable, Codable, Sendable {
     let body: String?
     let filesChanged: [String]
 
-    var reviewStatus: ReviewStatus
     var reviewers: [ReviewerInfo]
     var humanCommentCount: Int
     var isRequestedReviewer: Bool

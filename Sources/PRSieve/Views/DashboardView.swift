@@ -146,11 +146,15 @@ struct DashboardView: View {
         .padding(.bottom, 8)
     }
 
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     private var subtitle: String {
         if let last = viewModel.lastRefresh {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .abbreviated
-            return "\(viewModel.totalCount) PRs · Updated \(formatter.localizedString(for: last, relativeTo: Date()))"
+            return "\(viewModel.totalCount) PRs · Updated \(Self.relativeFormatter.localizedString(for: last, relativeTo: Date()))"
         }
         return "\(viewModel.totalCount) PRs"
     }

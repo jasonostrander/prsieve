@@ -29,18 +29,15 @@ actor GitHubClient {
     // MARK: - Fetch PRs requesting review from user
 
     func fetchReviewRequests(repo: String, username: String) async throws -> [PullRequest] {
-        // Get PRs where user is a requested reviewer
         let searchQuery = "repo:\(repo) is:pr is:open review-requested:\(username)"
-        let prs = try await searchPRs(query: searchQuery)
-
-        // Also get PRs assigned to user as reviewer via team
         let teamQuery = "repo:\(repo) is:pr is:open user-review-requested:\(username)"
-        let teamPRs = try await searchPRs(query: teamQuery)
 
-        // Merge, deduplicate by number
+        async let prs = searchPRs(query: searchQuery, username: username)
+        async let teamPRs = searchPRs(query: teamQuery, username: username)
+
         var seen = Set<String>()
         var result: [PullRequest] = []
-        for pr in prs + teamPRs {
+        for pr in try await prs + teamPRs {
             if seen.insert(pr.id).inserted {
                 result.append(pr)
             }
@@ -48,7 +45,7 @@ actor GitHubClient {
         return result
     }
 
-    private func searchPRs(query: String) async throws -> [PullRequest] {
+    private func searchPRs(query: String, username: String) async throws -> [PullRequest] {
         var components = URLComponents(url: baseURL.appendingPathComponent("search/issues"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "q", value: query),
@@ -59,10 +56,9 @@ actor GitHubClient {
         let data = try await fetch(components.url!)
         let searchResult = try decoder.decode(GitHubSearchResult.self, from: data)
 
-        // Search API returns minimal data; we need to fetch full PR details
         var pullRequests: [PullRequest] = []
         for item in searchResult.items {
-            if let pr = try? await fetchPRDetail(repo: item.repoFullName, number: item.number) {
+            if let pr = try? await fetchPRDetail(repo: item.repoFullName, number: item.number, username: username) {
                 pullRequests.append(pr)
             }
         }
@@ -80,37 +76,37 @@ actor GitHubClient {
 
     // MARK: - Fetch full PR detail
 
-    func fetchPRDetail(repo: String, number: Int) async throws -> PullRequest {
+    func fetchPRDetail(repo: String, number: Int, username: String? = nil) async throws -> PullRequest {
         let url = repoURL(repo, path: "/pulls/\(number)")
         let data = try await fetch(url)
         let ghPR = try decoder.decode(GitHubPR.self, from: data)
 
-        // Fetch files changed
-        let filesURL = repoURL(repo, path: "/pulls/\(number)/files")
-        let filesData = try await fetch(filesURL)
-        let files = try decoder.decode([GitHubFile].self, from: filesData)
+        // Fetch supplemental data in parallel
+        async let filesData = fetch(repoURL(repo, path: "/pulls/\(number)/files"))
+        async let reviewsData = fetch(repoURL(repo, path: "/pulls/\(number)/reviews"))
+        async let reviewCommentsData = fetch(repoURL(repo, path: "/pulls/\(number)/comments"))
+        async let issueCommentsData = fetch(repoURL(repo, path: "/issues/\(number)/comments"))
 
-        // Fetch reviews to determine review status
-        let reviewsURL = repoURL(repo, path: "/pulls/\(number)/reviews")
-        let reviewsData = try await fetch(reviewsURL)
-        let reviews = try decoder.decode([GitHubReview].self, from: reviewsData)
+        let files = try decoder.decode([GitHubFile].self, from: try await filesData)
+        let reviews = try decoder.decode([GitHubReview].self, from: try await reviewsData)
+        let reviewComments = try decoder.decode([GitHubComment].self, from: try await reviewCommentsData)
+        let issueComments = try decoder.decode([GitHubComment].self, from: try await issueCommentsData)
 
-        let reviewStatus = Self.latestReviewStatus(from: reviews)
         let reviewers = Self.perReviewerStatus(from: reviews)
-
-        // Fetch review comments (inline code comments) and issue comments
-        let reviewCommentsURL = repoURL(repo, path: "/pulls/\(number)/comments")
-        let reviewCommentsData = try await fetch(reviewCommentsURL)
-        let reviewComments = try decoder.decode([GitHubComment].self, from: reviewCommentsData)
-
-        let issueCommentsURL = repoURL(repo, path: "/issues/\(number)/comments")
-        let issueCommentsData = try await fetch(issueCommentsURL)
-        let issueComments = try decoder.decode([GitHubComment].self, from: issueCommentsData)
 
         let humanCommentCount = (reviewComments + issueComments)
             .filter { !Self.isBot($0.user.login) }
-            .filter { $0.user.login != ghPR.user.login } // exclude PR author
+            .filter { $0.user.login != ghPR.user.login }
             .count
+
+        // Check if user is mentioned (avoids a separate API call later)
+        let isMentioned: Bool
+        if let username {
+            let mention = "@\(username)"
+            isMentioned = issueComments.contains { $0.body.contains(mention) }
+        } else {
+            isMentioned = false
+        }
 
         return PullRequest(
             repoFullName: repo,
@@ -127,12 +123,11 @@ actor GitHubClient {
             baseBranch: ghPR.base.ref,
             body: String(ghPR.body?.prefix(1000) ?? ""),
             filesChanged: files.map(\.filename),
-            reviewStatus: reviewStatus,
             reviewers: reviewers,
             humanCommentCount: humanCommentCount,
-            isRequestedReviewer: false, // will be set by caller
-            isMentioned: false, // will be determined separately
-            category: .low, // default, will be categorized
+            isRequestedReviewer: false,
+            isMentioned: isMentioned,
+            category: .low,
             categoryOverridden: false,
             categoryReason: "",
             buildStatus: nil,
@@ -191,42 +186,27 @@ actor GitHubClient {
     // MARK: - Review Status Logic
 
     static func latestReviewStatus(from reviews: [GitHubReview]) -> ReviewStatus {
-        // Get the most recent non-comment review
         let meaningful = reviews.filter { $0.state != "COMMENTED" }
         guard let latest = meaningful.last else { return .pending }
-        switch latest.state {
-        case "APPROVED": return .approved
-        case "CHANGES_REQUESTED": return .changesRequested
-        case "DISMISSED": return .dismissed
-        default: return .pending
-        }
+        return ReviewStatus(githubState: latest.state)
     }
 
     /// Build per-reviewer status from all reviews, taking each reviewer's latest state.
     static func perReviewerStatus(from reviews: [GitHubReview]) -> [ReviewerInfo] {
-        // Filter out bots
         let humanReviews = reviews.filter { !isBot($0.user.login) }
 
-        // Group by reviewer, keep latest review per person
         var latestByLogin: [String: GitHubReview] = [:]
         for review in humanReviews {
-            latestByLogin[review.user.login] = review // later reviews overwrite earlier
+            latestByLogin[review.user.login] = review
         }
 
         return latestByLogin.values
             .sorted { $0.user.login < $1.user.login }
             .map { review in
-                let state: ReviewStatus = switch review.state {
-                case "APPROVED": .approved
-                case "CHANGES_REQUESTED": .changesRequested
-                case "COMMENTED": .commented
-                case "DISMISSED": .dismissed
-                default: .pending
-                }
-                return ReviewerInfo(
+                ReviewerInfo(
                     login: review.user.login,
                     avatarURL: URL(string: review.user.avatarUrl),
-                    state: state
+                    state: ReviewStatus(githubState: review.state)
                 )
             }
     }

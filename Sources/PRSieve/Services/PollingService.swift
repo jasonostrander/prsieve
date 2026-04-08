@@ -67,14 +67,7 @@ actor PollingService {
 
             for var pr in fetchedPRs {
                 pr.isRequestedReviewer = true
-
-                // Check if mentioned
-                let isMentioned = (try? await githubClient.isUserMentioned(
-                    repo: repo,
-                    number: pr.number,
-                    username: settings.githubUsername
-                )) ?? false
-                pr.isMentioned = isMentioned
+                // isMentioned is already set by fetchPRDetail
 
                 // Preserve user overrides from existing data
                 if let existing = existingByID[pr.id] {
