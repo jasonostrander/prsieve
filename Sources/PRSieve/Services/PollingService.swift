@@ -127,13 +127,14 @@ actor PollingService {
             allPRs.append(contentsOf: prsForRepo)
         }
 
-        // Mark previously-known PRs as merged/closed if they disappeared
+        // Mark previously-known PRs as merged/closed if they disappeared.
+        // Keep them for 7 days so the "Show merged" toggle is useful.
+        let mergedRetention: TimeInterval = 7 * 24 * 3600
         for (id, existing) in existingByID {
             if !allPRs.contains(where: { $0.id == id }) {
                 var merged = existing
                 merged.isMerged = true
-                // Keep flagged merged PRs
-                if merged.isFlagged {
+                if merged.isFlagged || Date().timeIntervalSince(merged.updatedAt) < mergedRetention {
                     allPRs.append(merged)
                 }
             }
