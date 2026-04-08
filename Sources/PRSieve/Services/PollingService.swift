@@ -69,8 +69,20 @@ actor PollingService {
             var prsForRepo: [PullRequest] = []
             var needsCategorization: [(Int, PullRequest)] = [] // (index, pr)
 
+            // Parse CODEOWNERS for this repo
+            let codeownersText = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
+            let parser = codeownersText.map { CodeownersParser(content: $0) }
+
             for var pr in fetchedPRs {
                 pr.isRequestedReviewer = true
+
+                // Check if user is a direct (non-catch-all) codeowner
+                if let parser {
+                    pr.isDirectCodeowner = parser.isDirectOwner(
+                        username: settings.githubUsername,
+                        files: pr.filesChanged
+                    )
+                }
 
                 if let existing = existingByID[pr.id] {
                     pr.isFlagged = existing.isFlagged

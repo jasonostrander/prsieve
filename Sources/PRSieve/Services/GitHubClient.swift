@@ -156,6 +156,7 @@ actor GitHubClient {
             reviewers: reviewers,
             humanCommentCount: humanCommentCount,
             isRequestedReviewer: false,
+            isDirectCodeowner: false,
             isMentioned: isMentioned,
             category: .low,
             categoryOverridden: false,

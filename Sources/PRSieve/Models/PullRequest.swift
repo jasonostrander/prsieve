@@ -48,6 +48,7 @@ struct PullRequest: Identifiable, Codable, Sendable {
     var reviewers: [ReviewerInfo]
     var humanCommentCount: Int
     var isRequestedReviewer: Bool
+    var isDirectCodeowner: Bool
     var isMentioned: Bool
     var category: PRCategory
     var categoryOverridden: Bool

@@ -38,6 +38,11 @@ actor CategorizationService {
             return CategorizationResult(category: .priority, reason: "You were @mentioned in comments")
         }
 
+        // Pre-filter: requested reviewer but only via catch-all/fallthrough CODEOWNERS → low
+        if pr.isRequestedReviewer && !pr.isDirectCodeowner {
+            return CategorizationResult(category: .low, reason: "Fallthrough codeowner (not a direct owner of changed files)")
+        }
+
         // Everything else → LLM
         do {
             return try await llmCategorize(pr: pr, codeowners: codeowners, userContext: userContext)

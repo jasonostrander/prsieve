@@ -64,7 +64,8 @@ func makePR(
     labels: [String] = [],
     filesChanged: [String] = ["src/main.swift"],
     isMentioned: Bool = false,
-    isRequestedReviewer: Bool = true
+    isRequestedReviewer: Bool = true,
+    isDirectCodeowner: Bool = false
 ) -> PullRequest {
     PullRequest(
         repoFullName: "owner/repo",
@@ -84,6 +85,7 @@ func makePR(
         reviewers: [],
         humanCommentCount: 0,
         isRequestedReviewer: isRequestedReviewer,
+        isDirectCodeowner: isDirectCodeowner,
         isMentioned: isMentioned,
         category: .low,
         categoryOverridden: false,
@@ -173,7 +175,7 @@ func runAllTests() async {
         let llm = MockLLMClient()
         await llm.setResponse(#"{"category": "priority", "reason": "Touches cart module"}"#)
         let service = CategorizationService(llmClient: llm)
-        let result = await service.categorize(pr: makePR(), codeowners: nil, userContext: "I own the cart module")
+        let result = await service.categorize(pr: makePR(isDirectCodeowner: true), codeowners: nil, userContext: "I own the cart module")
         t.checkEqual(result.category, .priority, "LLM returns priority")
         t.checkEqual(result.reason, "Touches cart module", "LLM reason preserved")
         let calls = await llm.getCallCount()
@@ -184,7 +186,7 @@ func runAllTests() async {
         let llm = MockLLMClient()
         await llm.setResponse("```json\n{\"category\": \"priority\", \"reason\": \"In user domain\"}\n```")
         let service = CategorizationService(llmClient: llm)
-        let result = await service.categorize(pr: makePR(), codeowners: nil, userContext: "")
+        let result = await service.categorize(pr: makePR(isDirectCodeowner: true), codeowners: nil, userContext: "")
         t.checkEqual(result.category, .priority, "LLM code block parsed")
     }
 
@@ -192,7 +194,7 @@ func runAllTests() async {
         let llm = MockLLMClient()
         await llm.setShouldThrow(true)
         let service = CategorizationService(llmClient: llm)
-        let result = await service.categorize(pr: makePR(), codeowners: nil, userContext: "")
+        let result = await service.categorize(pr: makePR(isDirectCodeowner: true), codeowners: nil, userContext: "")
         t.checkEqual(result.category, .low, "LLM failure → low")
         t.check(result.reason.contains("LLM unavailable"), "LLM failure reason")
     }
@@ -201,7 +203,7 @@ func runAllTests() async {
         let llm = MockLLMClient()
         await llm.setResponse("I don't know how to respond in JSON")
         let service = CategorizationService(llmClient: llm)
-        let result = await service.categorize(pr: makePR(), codeowners: nil, userContext: "")
+        let result = await service.categorize(pr: makePR(isDirectCodeowner: true), codeowners: nil, userContext: "")
         t.checkEqual(result.category, .low, "unparsable → low")
         t.check(result.reason.contains("Could not parse"), "unparsable reason")
     }
@@ -400,6 +402,203 @@ func runAllTests() async {
         pr2.buildStatus = .passed
         let hasPriority = [pr1, pr2].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
         t.check(hasPriority, "mixed priority PRs: one passing triggers indicator")
+    }
+
+    // --- CodeownersParser: Pattern matching ---
+
+    // Catch-all patterns
+    t.check(CodeownersParser.isCatchAllPattern("*"), "* is catch-all")
+    t.check(CodeownersParser.isCatchAllPattern("**"), "** is catch-all")
+    t.check(CodeownersParser.isCatchAllPattern("**/*"), "**/* is catch-all")
+    t.check(CodeownersParser.isCatchAllPattern("/*"), "/* is catch-all")
+    t.check(!CodeownersParser.isCatchAllPattern("src/"), "src/ is not catch-all")
+    t.check(!CodeownersParser.isCatchAllPattern("*.swift"), "*.swift is not catch-all")
+
+    // Exact file match
+    t.check(CodeownersParser.matches(pattern: "README.md", filePath: "README.md"), "exact file match")
+    t.check(!CodeownersParser.matches(pattern: "README.md", filePath: "docs/README.md"), "exact file no nested match")
+
+    // Directory patterns
+    t.check(CodeownersParser.matches(pattern: "src/", filePath: "src/main.swift"), "dir pattern with trailing slash")
+    t.check(CodeownersParser.matches(pattern: "/src/", filePath: "src/main.swift"), "dir pattern with leading+trailing slash")
+    t.check(CodeownersParser.matches(pattern: "src/", filePath: "src/sub/file.swift"), "dir pattern nested")
+    t.check(!CodeownersParser.matches(pattern: "src/", filePath: "other/main.swift"), "dir pattern no match")
+
+    // Directory without trailing slash (no extension = treated as dir)
+    t.check(CodeownersParser.matches(pattern: "src/models", filePath: "src/models/User.swift"), "dir without slash")
+    t.check(!CodeownersParser.matches(pattern: "src/models", filePath: "src/views/Main.swift"), "dir without slash no match")
+
+    // Wildcard: *.ext — matches anywhere per CODEOWNERS spec
+    t.check(CodeownersParser.matches(pattern: "*.swift", filePath: "main.swift"), "*.ext root file")
+    t.check(CodeownersParser.matches(pattern: "*.swift", filePath: "src/main.swift"), "*.ext matches nested")
+    t.check(!CodeownersParser.matches(pattern: "*.swift", filePath: "src/main.kt"), "*.ext wrong extension")
+
+    // Double-star wildcard: **/*.ext
+    t.check(CodeownersParser.matches(pattern: "**/*.swift", filePath: "src/main.swift"), "**/*.ext nested")
+    t.check(CodeownersParser.matches(pattern: "**/*.swift", filePath: "main.swift"), "**/*.ext root")
+    t.check(!CodeownersParser.matches(pattern: "**/*.swift", filePath: "src/main.kt"), "**/*.ext wrong ext")
+
+    // Path with wildcard: path/*
+    t.check(CodeownersParser.matches(pattern: "docs/*", filePath: "docs/guide.md"), "path/* direct child")
+    t.check(CodeownersParser.matches(pattern: "docs/*", filePath: "docs/sub/guide.md"), "path/* nested child")
+    t.check(!CodeownersParser.matches(pattern: "docs/*", filePath: "src/guide.md"), "path/* wrong dir")
+
+    // Path with **: path/**
+    t.check(CodeownersParser.matches(pattern: "src/**", filePath: "src/deep/nested/file.swift"), "path/** deep nested")
+
+    // Catch-all matches everything
+    t.check(CodeownersParser.matches(pattern: "*", filePath: "anything/at/all.txt"), "* matches everything")
+    t.check(CodeownersParser.matches(pattern: "**", filePath: "deep/path/file.go"), "** matches everything")
+
+    // --- CodeownersParser: Full parsing ---
+
+    do {
+        let content = """
+            # This is a comment
+            * @fallback-team
+            /src/auth/ @alice @bob
+            /src/cart/ @charlie
+            *.md @docs-team
+            """
+        let parser = CodeownersParser(content: content)
+        t.checkEqual(parser.rules.count, 4, "parsed 4 rules (skipped comment + blank)")
+
+        // Catch-all rule
+        t.check(parser.rules[0].isCatchAll, "first rule is catch-all")
+        t.checkEqual(parser.rules[0].owners, ["@fallback-team"], "catch-all owner")
+
+        // Specific rules
+        t.check(!parser.rules[1].isCatchAll, "auth rule not catch-all")
+        t.checkEqual(parser.rules[1].owners, ["@alice", "@bob"], "auth owners")
+    }
+
+    // --- CodeownersParser: Last-match-wins ---
+
+    do {
+        let content = """
+            * @fallback
+            /src/ @team-lead
+            /src/cart/ @charlie
+            """
+        let parser = CodeownersParser(content: content)
+
+        let (owners1, catchAll1) = parser.owners(for: "src/cart/Cart.swift")
+        t.check(!catchAll1, "cart file not catch-all")
+        t.checkEqual(owners1, ["@charlie"], "cart file owned by charlie (last match)")
+
+        let (owners2, catchAll2) = parser.owners(for: "src/auth/Login.swift")
+        t.check(!catchAll2, "auth file not catch-all")
+        t.checkEqual(owners2, ["@team-lead"], "auth file owned by team-lead")
+
+        let (owners3, catchAll3) = parser.owners(for: "README.md")
+        t.check(catchAll3, "README only matches catch-all")
+        t.checkEqual(owners3, ["@fallback"], "README owned by fallback")
+    }
+
+    // --- CodeownersParser: isDirectOwner ---
+
+    do {
+        let content = """
+            * @fallback-team @jasonostrander
+            /src/cart/ @jasonostrander
+            /src/auth/ @alice
+            """
+        let parser = CodeownersParser(content: content)
+
+        // User owns src/cart/ directly
+        t.check(
+            parser.isDirectOwner(username: "jasonostrander", files: ["src/cart/Cart.swift"]),
+            "direct owner of cart file"
+        )
+
+        // User is in catch-all but NOT direct owner of auth files
+        t.check(
+            !parser.isDirectOwner(username: "jasonostrander", files: ["src/auth/Login.swift"]),
+            "not direct owner of auth file (only catch-all)"
+        )
+
+        // Mixed: one file is direct, one is catch-all → still direct owner
+        t.check(
+            parser.isDirectOwner(username: "jasonostrander", files: ["src/auth/Login.swift", "src/cart/Cart.swift"]),
+            "direct owner when at least one file matches"
+        )
+
+        // Files only matching catch-all
+        t.check(
+            !parser.isDirectOwner(username: "jasonostrander", files: ["README.md", "docs/setup.md"]),
+            "not direct owner when all files are catch-all"
+        )
+
+        // User not in any rule
+        t.check(
+            !parser.isDirectOwner(username: "bob", files: ["src/cart/Cart.swift"]),
+            "bob not owner of cart"
+        )
+    }
+
+    // --- CodeownersParser: Case-insensitive owner matching ---
+
+    do {
+        let content = "/src/ @JasonOstrander"
+        let parser = CodeownersParser(content: content)
+        t.check(
+            parser.isDirectOwner(username: "jasonostrander", files: ["src/file.swift"]),
+            "case-insensitive owner match"
+        )
+    }
+
+    // --- CodeownersParser: No CODEOWNERS file ---
+
+    do {
+        let parser = CodeownersParser(content: "")
+        t.check(!parser.isDirectOwner(username: "anyone", files: ["file.txt"]), "empty CODEOWNERS → not direct owner")
+    }
+
+    // --- Categorization: Fallthrough codeowner → low ---
+
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        // isRequestedReviewer but NOT isDirectCodeowner
+        let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: false)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result.category, .low, "fallthrough codeowner → low")
+        t.check(result.reason.contains("Fallthrough"), "fallthrough reason")
+        let calls = await llm.getCallCount()
+        t.checkEqual(calls, 0, "fallthrough skips LLM")
+    }
+
+    // --- Categorization: Direct codeowner → goes to LLM ---
+
+    do {
+        let llm = MockLLMClient()
+        await llm.setResponse(#"{"category": "priority", "reason": "Owns this code"}"#)
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: true)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "I own src/cart")
+        t.checkEqual(result.category, .priority, "direct codeowner → LLM categorizes")
+        let calls = await llm.getCallCount()
+        t.checkEqual(calls, 1, "direct codeowner calls LLM")
+    }
+
+    // --- Categorization: @mentioned overrides fallthrough ---
+
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isMentioned: true, isRequestedReviewer: true, isDirectCodeowner: false)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result.category, .priority, "mentioned overrides fallthrough")
+    }
+
+    // --- Categorization: Draft overrides everything ---
+
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isDraft: true, isRequestedReviewer: true, isDirectCodeowner: true)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result.category, .noise, "draft overrides direct codeowner")
     }
 
     // --- PullRequest Model ---
