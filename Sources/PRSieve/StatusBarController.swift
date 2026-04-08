@@ -24,11 +24,33 @@ final class StatusBarController: NSObject {
         popover.contentViewController = NSHostingController(rootView: content)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle",
-                                   accessibilityDescription: "PRSieve")
             button.target = self
             button.action = #selector(handleClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        updateIcon()
+    }
+
+    private func updateIcon() {
+        let hasPriority = withObservationTracking {
+            !viewModel.priority.isEmpty
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.updateIcon() }
+        }
+
+        guard let button = statusItem.button else { return }
+
+        let symbolName = hasPriority
+            ? "line.3.horizontal.decrease.circle.fill"
+            : "line.3.horizontal.decrease.circle"
+
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "PRSieve")
+        if hasPriority {
+            let config = NSImage.SymbolConfiguration(paletteColors: [.white, .systemOrange])
+            button.image = image?.withSymbolConfiguration(config)
+        } else {
+            button.image = image
         }
     }
 
