@@ -65,11 +65,13 @@ actor PollingService {
                 username: settings.githubUsername
             )
 
+            // Apply overrides and collect PRs needing categorization
+            var prsForRepo: [PullRequest] = []
+            var needsCategorization: [(Int, PullRequest)] = [] // (index, pr)
+
             for var pr in fetchedPRs {
                 pr.isRequestedReviewer = true
-                // isMentioned is already set by fetchPRDetail
 
-                // Preserve user overrides from existing data
                 if let existing = existingByID[pr.id] {
                     pr.isFlagged = existing.isFlagged
                     if existing.categoryOverridden {
@@ -80,21 +82,49 @@ actor PollingService {
                     }
                 }
 
-                // Categorize if not already overridden
+                let idx = prsForRepo.count
+                prsForRepo.append(pr)
+
                 if !pr.categoryOverridden {
-                    let codeowners = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
-                    let result = await categorizationService.categorize(
-                        pr: pr,
-                        codeowners: codeowners,
-                        userContext: settings.codeownerContext
-                    )
-                    pr.category = result.category
-                    pr.categoryReason = result.reason
-                    pr.lastCategorizedAt = Date()
+                    needsCategorization.append((idx, pr))
+                }
+            }
+
+            // Categorize concurrently (bounded to 5 at a time)
+            let codeowners = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
+            let userContext = settings.codeownerContext
+            let catService = categorizationService
+
+            await withTaskGroup(of: (Int, CategorizationService.CategorizationResult).self) { group in
+                let maxConcurrency = 5
+                var idx = 0
+
+                for _ in 0..<min(maxConcurrency, needsCategorization.count) {
+                    let (prIdx, pr) = needsCategorization[idx]
+                    idx += 1
+                    group.addTask {
+                        let result = await catService.categorize(pr: pr, codeowners: codeowners, userContext: userContext)
+                        return (prIdx, result)
+                    }
                 }
 
-                allPRs.append(pr)
+                for await (prIdx, result) in group {
+                    prsForRepo[prIdx].category = result.category
+                    prsForRepo[prIdx].categoryReason = result.reason
+                    prsForRepo[prIdx].lastCategorizedAt = Date()
+
+                    if idx < needsCategorization.count {
+                        let (nextPrIdx, nextPr) = needsCategorization[idx]
+                        idx += 1
+                        group.addTask {
+                            let result = await catService.categorize(pr: nextPr, codeowners: codeowners, userContext: userContext)
+                            return (nextPrIdx, result)
+                        }
+                    }
+                }
             }
+
+            allPRs.append(contentsOf: prsForRepo)
         }
 
         // Mark previously-known PRs as merged/closed if they disappeared

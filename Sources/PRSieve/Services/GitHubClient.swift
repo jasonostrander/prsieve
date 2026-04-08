@@ -32,20 +32,24 @@ actor GitHubClient {
         let searchQuery = "repo:\(repo) is:pr is:open review-requested:\(username)"
         let teamQuery = "repo:\(repo) is:pr is:open user-review-requested:\(username)"
 
-        async let prs = searchPRs(query: searchQuery, username: username)
-        async let teamPRs = searchPRs(query: teamQuery, username: username)
+        // Run both searches in parallel
+        async let items1 = searchItems(query: searchQuery)
+        async let items2 = searchItems(query: teamQuery)
 
-        var seen = Set<String>()
-        var result: [PullRequest] = []
-        for pr in try await prs + teamPRs {
-            if seen.insert(pr.id).inserted {
-                result.append(pr)
+        // Dedup by PR number before fetching details (avoids duplicate API calls)
+        var seen = Set<Int>()
+        var uniqueItems: [GitHubSearchItem] = []
+        for item in try await items1 + items2 {
+            if seen.insert(item.number).inserted {
+                uniqueItems.append(item)
             }
         }
-        return result
+
+        // Fetch PR details concurrently (bounded to 5 at a time)
+        return try await fetchDetailsConcurrently(items: uniqueItems, username: username)
     }
 
-    private func searchPRs(query: String, username: String) async throws -> [PullRequest] {
+    private func searchItems(query: String) async throws -> [GitHubSearchItem] {
         var components = URLComponents(url: baseURL.appendingPathComponent("search/issues"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "q", value: query),
@@ -55,14 +59,38 @@ actor GitHubClient {
 
         let data = try await fetch(components.url!)
         let searchResult = try decoder.decode(GitHubSearchResult.self, from: data)
+        return searchResult.items
+    }
 
-        var pullRequests: [PullRequest] = []
-        for item in searchResult.items {
-            if let pr = try? await fetchPRDetail(repo: item.repoFullName, number: item.number, username: username) {
-                pullRequests.append(pr)
+    private func fetchDetailsConcurrently(items: [GitHubSearchItem], username: String) async throws -> [PullRequest] {
+        try await withThrowingTaskGroup(of: PullRequest?.self) { group in
+            let maxConcurrency = 5
+            var results: [PullRequest] = []
+            var index = 0
+
+            // Seed initial batch
+            for _ in 0..<min(maxConcurrency, items.count) {
+                let item = items[index]
+                index += 1
+                group.addTask {
+                    try? await self.fetchPRDetail(repo: item.repoFullName, number: item.number, username: username)
+                }
             }
+
+            // As each completes, start the next
+            for try await pr in group {
+                if let pr { results.append(pr) }
+                if index < items.count {
+                    let item = items[index]
+                    index += 1
+                    group.addTask {
+                        try? await self.fetchPRDetail(repo: item.repoFullName, number: item.number, username: username)
+                    }
+                }
+            }
+
+            return results
         }
-        return pullRequests
     }
 
     // MARK: - URL Helpers
