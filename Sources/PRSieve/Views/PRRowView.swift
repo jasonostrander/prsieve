@@ -33,6 +33,8 @@ struct PRCardView: View {
                 Text(pr.repoShortName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Text("·")
                     .foregroundStyle(.quaternary)
@@ -40,6 +42,8 @@ struct PRCardView: View {
                 Text(pr.author)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
                 if pr.isDraft {
                     Text("·")
