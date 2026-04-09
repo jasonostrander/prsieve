@@ -62,6 +62,12 @@ extension Color {
     static let noiseAccent = Color(light: .init(h: 0, s: 0.00, b: 0.60),
                                    dark:  .init(h: 0, s: 0.00, b: 0.45))
 
+    // Reviewed — muted green, similar to approved
+    static let reviewedBg     = Color(light: .init(h: 145, s: 0.10, b: 0.95),
+                                      dark:  .init(h: 145, s: 0.12, b: 0.18))
+    static let reviewedAccent = Color(light: .init(h: 145, s: 0.40, b: 0.55),
+                                      dark:  .init(h: 145, s: 0.35, b: 0.55))
+
     // Status pills — high contrast against any card background
     static let pillApprovedText  = Color(light: .init(h: 145, s: 0.70, b: 0.35),
                                          dark:  .init(h: 145, s: 0.55, b: 0.75))

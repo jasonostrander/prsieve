@@ -187,6 +187,16 @@ actor GitHubClient {
         }
     }
 
+    // MARK: - Lightweight PR state check
+
+    /// Fetch only the state of a PR (open/closed/merged) without supplemental data.
+    func fetchPRState(repo: String, number: Int) async throws -> (isMerged: Bool, isClosed: Bool) {
+        let url = repoURL(repo, path: "/pulls/\(number)")
+        let data = try await fetch(url)
+        let ghPR = try decoder.decode(GitHubPRState.self, from: data)
+        return (isMerged: ghPR.merged ?? false, isClosed: ghPR.state == "closed")
+    }
+
     // MARK: - CODEOWNERS
 
     func fetchCodeowners(repo: String) async throws -> String? {
@@ -367,6 +377,12 @@ struct GitHubComment: Decodable, Sendable {
 struct GitHubContentFile: Decodable, Sendable {
     let content: String?
     let encoding: String?
+}
+
+// Lightweight PR state (for checking merged/closed without full detail fetch)
+struct GitHubPRState: Decodable, Sendable {
+    let state: String
+    let merged: Bool?
 }
 
 // Combined commit status

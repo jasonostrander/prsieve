@@ -144,16 +144,60 @@ actor PollingService {
             allPRs.append(contentsOf: prsForRepo)
         }
 
-        // Mark previously-known PRs as merged/closed if they disappeared.
-        // Keep them for 7 days so the "Show merged" toggle is useful.
+        // Handle PRs that disappeared from search results.
+        // The search API can miss team/CODEOWNERS-based review requests, so we
+        // re-fetch disappeared PRs to check their actual state.
         let mergedRetention: TimeInterval = 7 * 24 * 3600
-        for (id, existing) in existingByID {
-            if !allPRs.contains(where: { $0.id == id }) {
-                var merged = existing
-                merged.isMerged = true
-                if merged.isFlagged || Date().timeIntervalSince(merged.updatedAt) < mergedRetention {
-                    allPRs.append(merged)
+        let currentIDs = Set(allPRs.map(\.id))
+        let disappeared = existingByID.filter { !currentIDs.contains($0.key) }
+        for (_, existing) in disappeared {
+            if let state = try? await githubClient.fetchPRState(repo: existing.repoFullName, number: existing.number) {
+                if state.isMerged || state.isClosed {
+                    // Actually merged/closed — keep in list for "show merged" toggle
+                    var updated = existing
+                    updated.isMerged = state.isMerged
+                    updated.isClosed = state.isClosed
+                    if updated.isFlagged || Date().timeIntervalSince(updated.updatedAt) < mergedRetention {
+                        allPRs.append(updated)
+                    }
+                } else {
+                    // Still open — search API missed it. Re-fetch full details.
+                    if let refreshed = try? await githubClient.fetchPRDetail(
+                        repo: existing.repoFullName,
+                        number: existing.number,
+                        username: settings.githubUsername
+                    ) {
+                        var pr = refreshed
+                        pr.isRequestedReviewer = true
+                        pr.isFlagged = existing.isFlagged
+                        if existing.categoryOverridden {
+                            pr.category = existing.category
+                            pr.categoryOverridden = true
+                            pr.categoryReason = existing.categoryReason
+                            pr.lastCategorizedAt = existing.lastCategorizedAt
+                        } else {
+                            // Re-categorize
+                            let codeowners = codeownersCache[existing.repoFullName].flatMap { $0.isEmpty ? nil : $0 }
+                            let parser: CodeownersParser? = parserCache[existing.repoFullName]
+                            if let parser {
+                                pr.isDirectCodeowner = parser.isDirectOwner(
+                                    username: settings.githubUsername,
+                                    files: pr.filesChanged
+                                )
+                            }
+                            let result = await categorizationService.categorize(
+                                pr: pr, codeowners: codeowners, userContext: settings.codeownerContext
+                            )
+                            pr.category = result.category
+                            pr.categoryReason = result.reason
+                            pr.lastCategorizedAt = Date()
+                        }
+                        allPRs.append(pr)
+                    }
                 }
+            } else {
+                // API call failed — preserve existing PR to avoid data loss
+                allPRs.append(existing)
             }
         }
 

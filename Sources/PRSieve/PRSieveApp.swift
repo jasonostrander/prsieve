@@ -105,6 +105,7 @@ final class AppState {
     private func buildAndStartServices(viewModel: DashboardViewModel, persistence: PersistenceService) async {
         let settings = await persistence.loadSettings()
         viewModel.hideDrafts = settings.hideDraftPRs
+        viewModel.githubUsername = settings.githubUsername
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""

@@ -11,8 +11,10 @@ final class DashboardViewModel {
     var showMerged = false
     var showReadyToMerge = false
     var hideDrafts = true
+    var githubUsername = ""
 
     var collapsedSections: Set<PRCategory> = []
+    var collapsedReviewed = true
     var categorySummaries: [PRCategory: String] = [:]
 
     private var pollingService: PollingService?
@@ -22,11 +24,24 @@ final class DashboardViewModel {
     private var pollingTask: Task<Void, Never>?
     private var summaryTasks: [PRCategory: Task<Void, Never>] = [:]
 
-    var priority: [PullRequest] { filtered(.priority) }
-    var low: [PullRequest] { filtered(.low) }
-    var noise: [PullRequest] { filtered(.noise) }
+    var priority: [PullRequest] { filtered(.priority).filter { !isReviewedByMe($0) } }
+    var low: [PullRequest] { filtered(.low).filter { !isReviewedByMe($0) } }
+    var noise: [PullRequest] { filtered(.noise).filter { !isReviewedByMe($0) } }
+    var reviewed: [PullRequest] {
+        pullRequests
+            .filter { isReviewedByMe($0) }
+            .filter { showMerged || !$0.isMerged }
+            .filter { !hideDrafts || !$0.isDraft }
+            .filter { searchText.isEmpty || matchesSearch($0) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
 
-    var totalCount: Int { priority.count + low.count + noise.count }
+    var totalCount: Int { priority.count + low.count + noise.count + reviewed.count }
+
+    private func isReviewedByMe(_ pr: PullRequest) -> Bool {
+        guard !githubUsername.isEmpty else { return false }
+        return pr.reviewers.contains { $0.login.caseInsensitiveCompare(githubUsername) == .orderedSame && $0.state == .approved }
+    }
 
     private func filtered(_ category: PRCategory) -> [PullRequest] {
         pullRequests

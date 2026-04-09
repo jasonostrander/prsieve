@@ -653,6 +653,54 @@ func runAllTests() async {
         t.checkEqual(shouldNotify([pr1, pr2, pr3, pr5]).count, 1, "notify: only priority+passing from mix")
     }
 
+    // --- Reviewed by me detection ---
+
+    do {
+        // Helper that mirrors DashboardViewModel.isReviewedByMe
+        func isReviewedByMe(_ pr: PullRequest, username: String) -> Bool {
+            guard !username.isEmpty else { return false }
+            return pr.reviewers.contains { $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state == .approved }
+        }
+
+        // PR with user's approval → reviewed
+        var pr1 = makePR()
+        pr1.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
+        t.check(isReviewedByMe(pr1, username: "jasonostrander"), "user approved → reviewed")
+
+        // Case-insensitive match
+        t.check(isReviewedByMe(pr1, username: "JasonOstrander"), "case-insensitive → reviewed")
+
+        // PR with user's changes_requested → not reviewed
+        var pr2 = makePR()
+        pr2.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .changesRequested)]
+        t.check(!isReviewedByMe(pr2, username: "jasonostrander"), "changes requested → not reviewed")
+
+        // PR with user's comment only → not reviewed
+        var pr3 = makePR()
+        pr3.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .commented)]
+        t.check(!isReviewedByMe(pr3, username: "jasonostrander"), "commented → not reviewed")
+
+        // PR with someone else's approval → not reviewed
+        var pr4 = makePR()
+        pr4.reviewers = [ReviewerInfo(login: "alice", avatarURL: nil, state: .approved)]
+        t.check(!isReviewedByMe(pr4, username: "jasonostrander"), "other user approved → not reviewed")
+
+        // PR with no reviewers → not reviewed
+        let pr5 = makePR()
+        t.check(!isReviewedByMe(pr5, username: "jasonostrander"), "no reviewers → not reviewed")
+
+        // Empty username → not reviewed
+        t.check(!isReviewedByMe(pr1, username: ""), "empty username → not reviewed")
+
+        // Mixed reviewers: user approved among others
+        var pr6 = makePR()
+        pr6.reviewers = [
+            ReviewerInfo(login: "alice", avatarURL: nil, state: .changesRequested),
+            ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved),
+        ]
+        t.check(isReviewedByMe(pr6, username: "jasonostrander"), "user approved among others → reviewed")
+    }
+
     // --- PullRequest Model ---
 
     do {
