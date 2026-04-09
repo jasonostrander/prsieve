@@ -6,35 +6,13 @@ struct PRCardView: View {
     let onToggleFlag: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Title + age
-            HStack(alignment: .firstTextBaseline) {
-                Text(pr.title)
-                    .font(.body)
-                    .fontWeight(.medium)
-                    .lineLimit(2)
-
-                Spacer(minLength: 8)
-
-                if pr.isFlagged {
-                    Image(systemName: "flag.fill")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-
-                Text(pr.ageDescription)
-                    .font(.caption)
-                    .foregroundStyle(ageColor)
-                    .monospacedDigit()
-            }
-
-            // Compact metadata
+        VStack(alignment: .leading, spacing: 4) {
+            // Repo + author line
             HStack(spacing: 6) {
                 Text(pr.repoShortName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
 
                 Text("·")
                     .foregroundStyle(.quaternary)
@@ -54,6 +32,27 @@ struct PRCardView: View {
                 }
 
                 Spacer()
+
+                Text(pr.ageDescription)
+                    .font(.caption)
+                    .foregroundStyle(ageColor)
+                    .monospacedDigit()
+            }
+
+            // Title
+            HStack(alignment: .firstTextBaseline) {
+                Text(pr.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+
+                Spacer(minLength: 8)
+
+                if pr.isFlagged {
+                    Image(systemName: "flag.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
 
                 reviewSummary
             }
