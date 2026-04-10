@@ -701,6 +701,50 @@ func runAllTests() async {
         t.check(isReviewedByMe(pr6, username: "jasonostrander"), "user approved among others → reviewed")
     }
 
+    // --- Closed PR filtering ---
+
+    do {
+        // Helper mirroring DashboardViewModel.filtered + reviewed logic
+        func visiblePRs(_ prs: [PullRequest]) -> [PullRequest] {
+            prs.filter { !$0.isClosed }
+        }
+
+        func visibleReviewed(_ prs: [PullRequest], username: String) -> [PullRequest] {
+            prs
+                .filter { pr in pr.reviewers.contains { $0.login == username && $0.state == .approved } }
+                .filter { !$0.isClosed }
+        }
+
+        var openPR = makePR()
+        openPR.isClosed = false
+
+        var closedPR = makePR()
+        closedPR.isClosed = true
+
+        // Open PR is visible
+        t.checkEqual(visiblePRs([openPR]).count, 1, "open PR appears in list")
+
+        // Closed PR is excluded
+        t.checkEqual(visiblePRs([closedPR]).count, 0, "closed PR excluded from list")
+
+        // Mixed: only open one shows
+        t.checkEqual(visiblePRs([openPR, closedPR]).count, 1, "only open PR shown in mixed list")
+
+        // Closed reviewed PR is also excluded
+        var closedReviewed = makePR()
+        closedReviewed.isClosed = true
+        closedReviewed.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
+        t.checkEqual(visibleReviewed([closedReviewed], username: "jasonostrander").count, 0,
+                     "closed reviewed PR excluded from reviewed section")
+
+        // Open reviewed PR appears
+        var openReviewed = makePR()
+        openReviewed.isClosed = false
+        openReviewed.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
+        t.checkEqual(visibleReviewed([openReviewed], username: "jasonostrander").count, 1,
+                     "open reviewed PR appears in reviewed section")
+    }
+
     // --- PullRequest Model ---
 
     do {

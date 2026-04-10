@@ -30,6 +30,7 @@ final class DashboardViewModel {
     var reviewed: [PullRequest] {
         pullRequests
             .filter { isReviewedByMe($0) }
+            .filter { !$0.isClosed }
             .filter { showMerged || !$0.isMerged }
             .filter { !hideDrafts || !$0.isDraft }
             .filter { searchText.isEmpty || matchesSearch($0) }
@@ -46,6 +47,7 @@ final class DashboardViewModel {
     private func filtered(_ category: PRCategory) -> [PullRequest] {
         pullRequests
             .filter { $0.category == category }
+            .filter { !$0.isClosed }
             .filter { showMerged || !$0.isMerged }
             .filter { !hideDrafts || !$0.isDraft }
             .filter { !showReadyToMerge || $0.buildStatus == .passed }
