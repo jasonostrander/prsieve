@@ -3,18 +3,43 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State var viewModel: SettingsViewModel
+    @State private var selectedTab = 0
 
     var body: some View {
-        TabView {
-            githubTab
-                .tabItem { Label("GitHub", systemImage: "person.crop.circle") }
-            llmTab
-                .tabItem { Label("LLM", systemImage: "brain") }
-            preferencesTab
-                .tabItem { Label("Preferences", systemImage: "gearshape") }
+        VStack(spacing: 0) {
+            Picker("", selection: $selectedTab) {
+                Label("GitHub", systemImage: "person.crop.circle").tag(0)
+                Label("LLM", systemImage: "brain").tag(1)
+                Label("Preferences", systemImage: "gearshape").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            Divider()
+
+            Group {
+                switch selectedTab {
+                case 0: githubTab
+                case 1: llmTab
+                default: preferencesTab
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.return, modifiers: .command)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .padding(20)
-        .frame(width: 550, height: 450)
+        .frame(width: 550, height: 480)
         .task { await viewModel.load() }
         .onChange(of: viewModel.settings) { _, _ in
             Task { await viewModel.save() }
@@ -22,14 +47,8 @@ struct SettingsView: View {
         .onChange(of: viewModel.githubToken) { _, _ in
             Task { await viewModel.save() }
         }
-
         .onChange(of: viewModel.llmAPIKey) { _, _ in
             Task { await viewModel.save() }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            Button("Done") { dismiss() }
-                .keyboardShortcut(.return, modifiers: .command)
-                .padding()
         }
     }
 
