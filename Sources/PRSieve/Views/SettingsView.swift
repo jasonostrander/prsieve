@@ -39,7 +39,7 @@ struct SettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .frame(width: 550, height: 480)
+        .frame(width: 650, height: 580)
         .task { await viewModel.load() }
         .onChange(of: viewModel.settings) { _, _ in
             Task { await viewModel.save() }
@@ -102,7 +102,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 4)
                 TextEditor(text: $viewModel.settings.codeownerContext)
-                    .frame(minHeight: 100)
+                    .frame(minHeight: 160)
                     .font(.body.monospaced())
             } header: {
                 Text("Your Code Ownership Context")

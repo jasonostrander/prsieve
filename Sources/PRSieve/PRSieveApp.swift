@@ -44,13 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let settingsVM = SettingsViewModel(persistence: persistence)
         let settingsView = SettingsView(viewModel: settingsVM)
-            .frame(minWidth: 500, minHeight: 400)
 
         let hostingController = NSHostingController(rootView: settingsView)
+        hostingController.sizingOptions = .preferredContentSize
         let window = NSWindow(contentViewController: hostingController)
         window.title = "PRSieve Settings"
         window.styleMask = [.titled, .closable, .resizable]
-        window.setContentSize(NSSize(width: 550, height: 500))
         window.center()
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
