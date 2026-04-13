@@ -106,6 +106,7 @@ final class AppState {
         let settings = await persistence.loadSettings()
         viewModel.hideDrafts = settings.hideDraftPRs
         viewModel.githubUsername = settings.githubUsername
+        viewModel.keepUnreviewedPriorityAfterMerge = settings.keepUnreviewedPriorityAfterMerge
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""

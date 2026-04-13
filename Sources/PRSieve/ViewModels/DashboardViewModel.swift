@@ -12,6 +12,7 @@ final class DashboardViewModel {
     var showReadyToMerge = false
     var hideDrafts = true
     var githubUsername = ""
+    var keepUnreviewedPriorityAfterMerge = true
 
     var collapsedSections: Set<PRCategory> = []
     var collapsedReviewed = true
@@ -48,11 +49,20 @@ final class DashboardViewModel {
         pullRequests
             .filter { $0.category == category }
             .filter { !$0.isClosed }
-            .filter { showMerged || !$0.isMerged }
+            .filter { showMerged || !$0.isMerged || isUnreviewedPriorityWithinGracePeriod($0) }
             .filter { !hideDrafts || !$0.isDraft }
             .filter { !showReadyToMerge || $0.buildStatus == .passed }
             .filter { searchText.isEmpty || matchesSearch($0) }
             .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func isUnreviewedPriorityWithinGracePeriod(_ pr: PullRequest) -> Bool {
+        guard keepUnreviewedPriorityAfterMerge,
+              pr.isMerged,
+              pr.category == .priority,
+              !isReviewedByMe(pr)
+        else { return false }
+        return Date().timeIntervalSince(pr.updatedAt) < 3 * 24 * 3600
     }
 
     private func matchesSearch(_ pr: PullRequest) -> Bool {

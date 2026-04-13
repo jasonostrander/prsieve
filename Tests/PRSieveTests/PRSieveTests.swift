@@ -65,7 +65,8 @@ func makePR(
     filesChanged: [String] = ["src/main.swift"],
     isMentioned: Bool = false,
     isRequestedReviewer: Bool = true,
-    isDirectCodeowner: Bool = false
+    isDirectCodeowner: Bool = false,
+    updatedAt: Date = Date()
 ) -> PullRequest {
     PullRequest(
         repoFullName: "owner/repo",
@@ -75,7 +76,7 @@ func makePR(
         authorAvatarURL: nil,
         htmlURL: URL(string: "https://github.com/owner/repo/pull/1")!,
         createdAt: Date().addingTimeInterval(-3600),
-        updatedAt: Date(),
+        updatedAt: updatedAt,
         isDraft: isDraft,
         labels: labels,
         headBranch: "feature",
@@ -743,6 +744,60 @@ func runAllTests() async {
         openReviewed.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
         t.checkEqual(visibleReviewed([openReviewed], username: "jasonostrander").count, 1,
                      "open reviewed PR appears in reviewed section")
+    }
+
+    // --- Keep unreviewed priority PRs after merge ---
+
+    do {
+        let username = "jasonostrander"
+
+        func isUnreviewedPriorityWithinGracePeriod(
+            _ pr: PullRequest,
+            enabled: Bool = true,
+            username: String = "jasonostrander"
+        ) -> Bool {
+            guard enabled, pr.isMerged, pr.category == .priority else { return false }
+            let isReviewed = pr.reviewers.contains { $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state == .approved }
+            guard !isReviewed else { return false }
+            return Date().timeIntervalSince(pr.updatedAt) < 3 * 24 * 3600
+        }
+
+        let recent = Date().addingTimeInterval(-1 * 24 * 3600)  // 1 day ago
+        let stale  = Date().addingTimeInterval(-4 * 24 * 3600)  // 4 days ago
+
+        // Merged priority PR, unreviewed, recent → keep visible
+        var pr1 = makePR(isDirectCodeowner: true, updatedAt: recent)
+        pr1.category = .priority
+        pr1.isMerged = true
+        t.check(isUnreviewedPriorityWithinGracePeriod(pr1), "merged priority unreviewed within 3d → keep")
+
+        // Merged priority PR, reviewed → do not keep
+        pr1.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .approved)]
+        t.check(!isUnreviewedPriorityWithinGracePeriod(pr1), "merged priority reviewed → don't keep")
+
+        // Merged priority PR, unreviewed, stale (> 3 days) → don't keep
+        var pr2 = makePR(isDirectCodeowner: true, updatedAt: stale)
+        pr2.category = .priority
+        pr2.isMerged = true
+        t.check(!isUnreviewedPriorityWithinGracePeriod(pr2), "merged priority unreviewed >3d → don't keep")
+
+        // Merged low PR → don't keep regardless
+        var pr3 = makePR(updatedAt: recent)
+        pr3.category = .low
+        pr3.isMerged = true
+        t.check(!isUnreviewedPriorityWithinGracePeriod(pr3), "merged low PR → don't keep")
+
+        // Feature disabled → don't keep
+        var pr4 = makePR(isDirectCodeowner: true, updatedAt: recent)
+        pr4.category = .priority
+        pr4.isMerged = true
+        t.check(!isUnreviewedPriorityWithinGracePeriod(pr4, enabled: false), "feature disabled → don't keep")
+
+        // Open priority PR → grace period logic doesn't apply
+        var pr5 = makePR(isDirectCodeowner: true, updatedAt: recent)
+        pr5.category = .priority
+        pr5.isMerged = false
+        t.check(!isUnreviewedPriorityWithinGracePeriod(pr5), "open PR → grace period not applicable")
     }
 
     // --- PullRequest Model ---

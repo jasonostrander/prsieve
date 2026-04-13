@@ -16,6 +16,7 @@ struct AppSettings: Codable, Sendable, Equatable {
     var pollingIntervalSeconds: Int = 300
     var hideDraftPRs: Bool = true
     var notificationsEnabled: Bool = true
+    var keepUnreviewedPriorityAfterMerge: Bool = true
 
     static let `default` = AppSettings()
 
@@ -32,5 +33,6 @@ struct AppSettings: Codable, Sendable, Equatable {
         pollingIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollingIntervalSeconds) ?? 300
         hideDraftPRs = try container.decodeIfPresent(Bool.self, forKey: .hideDraftPRs) ?? true
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
+        keepUnreviewedPriorityAfterMerge = try container.decodeIfPresent(Bool.self, forKey: .keepUnreviewedPriorityAfterMerge) ?? true
     }
 }
