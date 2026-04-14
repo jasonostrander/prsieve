@@ -110,6 +110,7 @@ actor PollingService {
             // Categorize concurrently (bounded to 5 at a time)
             let codeowners = codeownersCache[repo].flatMap { $0.isEmpty ? nil : $0 }
             let userContext = settings.codeownerContext
+            let username = settings.githubUsername
             let catService = categorizationService
 
             await withTaskGroup(of: (Int, CategorizationService.CategorizationResult).self) { group in
@@ -120,7 +121,7 @@ actor PollingService {
                     let (prIdx, pr) = needsCategorization[idx]
                     idx += 1
                     group.addTask {
-                        let result = await catService.categorize(pr: pr, codeowners: codeowners, userContext: userContext)
+                        let result = await catService.categorize(pr: pr, codeowners: codeowners, userContext: userContext, username: username)
                         return (prIdx, result)
                     }
                 }
@@ -186,7 +187,8 @@ actor PollingService {
                                 )
                             }
                             let result = await categorizationService.categorize(
-                                pr: pr, codeowners: codeowners, userContext: settings.codeownerContext
+                                pr: pr, codeowners: codeowners, userContext: settings.codeownerContext,
+                                username: settings.githubUsername
                             )
                             pr.category = result.category
                             pr.categoryReason = result.reason

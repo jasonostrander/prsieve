@@ -16,7 +16,8 @@ actor CategorizationService {
     func categorize(
         pr: PullRequest,
         codeowners: String?,
-        userContext: String
+        userContext: String,
+        username: String = ""
     ) async -> CategorizationResult {
         // Noise: draft PRs
         if pr.isDraft {
@@ -38,9 +39,11 @@ actor CategorizationService {
             return CategorizationResult(category: .priority, reason: "You were @mentioned in comments")
         }
 
-        // Pre-filter: requested reviewer but only via catch-all/fallthrough CODEOWNERS → low
-        if pr.isRequestedReviewer && !pr.isDirectCodeowner {
-            return CategorizationResult(category: .low, reason: "Fallthrough codeowner (not a direct owner of changed files)")
+        // Pre-filter: user previously left a review → always priority
+        if !username.isEmpty && pr.reviewers.contains(where: {
+            $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state != .pending
+        }) {
+            return CategorizationResult(category: .priority, reason: "You previously reviewed this PR")
         }
 
         // Everything else → LLM

@@ -170,6 +170,59 @@ func runAllTests() async {
         t.checkEqual(calls, 0, "mentioned skips LLM")
     }
 
+    // --- Pre-filter: Previously Reviewed ---
+
+    do {
+        let username = "jasonostrander"
+
+        // Previously approved → priority, skips LLM
+        var prApproved = makePR()
+        prApproved.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .approved)]
+        let llm1 = MockLLMClient()
+        let svc1 = CategorizationService(llmClient: llm1)
+        let r1 = await svc1.categorize(pr: prApproved, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r1.category, .priority, "previously approved → priority")
+        t.check(r1.reason.contains("previously reviewed"), "previously reviewed reason")
+        t.checkEqual(await llm1.getCallCount(), 0, "previously reviewed skips LLM")
+
+        // Changes requested → priority, skips LLM
+        var prChanges = makePR()
+        prChanges.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .changesRequested)]
+        let llm2 = MockLLMClient()
+        let svc2 = CategorizationService(llmClient: llm2)
+        let r2 = await svc2.categorize(pr: prChanges, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r2.category, .priority, "changes requested → priority")
+        t.checkEqual(await llm2.getCallCount(), 0, "changes requested skips LLM")
+
+        // Pending (no review yet) → falls through to LLM
+        var prPending = makePR(isDirectCodeowner: true)
+        prPending.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .pending)]
+        let llm3 = MockLLMClient()
+        await llm3.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        let svc3 = CategorizationService(llmClient: llm3)
+        let r3 = await svc3.categorize(pr: prPending, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r3.category, .low, "pending state → falls through to LLM")
+        t.checkEqual(await llm3.getCallCount(), 1, "pending state hits LLM")
+
+        // Different user's review → falls through to LLM
+        var prOther = makePR(isDirectCodeowner: true)
+        prOther.reviewers = [ReviewerInfo(login: "alice", avatarURL: nil, state: .approved)]
+        let llm4 = MockLLMClient()
+        await llm4.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        let svc4 = CategorizationService(llmClient: llm4)
+        let r4 = await svc4.categorize(pr: prOther, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r4.category, .low, "other user's review → falls through to LLM")
+
+        // No username → falls through to LLM
+        var prNoUser = makePR(isDirectCodeowner: true)
+        prNoUser.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .approved)]
+        let llm5 = MockLLMClient()
+        await llm5.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        let svc5 = CategorizationService(llmClient: llm5)
+        let r5 = await svc5.categorize(pr: prNoUser, codeowners: nil, userContext: "", username: "")
+        t.checkEqual(r5.category, .low, "empty username → falls through to LLM")
+    }
+
     // --- LLM Categorization ---
 
     do {
@@ -555,18 +608,18 @@ func runAllTests() async {
         t.check(!parser.isDirectOwner(username: "anyone", files: ["file.txt"]), "empty CODEOWNERS → not direct owner")
     }
 
-    // --- Categorization: Fallthrough codeowner → low ---
+    // --- Categorization: Fallthrough codeowner → goes to LLM ---
 
     do {
         let llm = MockLLMClient()
+        await llm.setResponse(#"{"category": "low", "reason": "Not in user's area"}"#)
         let service = CategorizationService(llmClient: llm)
-        // isRequestedReviewer but NOT isDirectCodeowner
+        // isRequestedReviewer but NOT isDirectCodeowner — now goes to LLM instead of pre-filtering
         let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: false)
         let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
-        t.checkEqual(result.category, .low, "fallthrough codeowner → low")
-        t.check(result.reason.contains("Fallthrough"), "fallthrough reason")
+        t.checkEqual(result.category, .low, "fallthrough codeowner → LLM decides")
         let calls = await llm.getCallCount()
-        t.checkEqual(calls, 0, "fallthrough skips LLM")
+        t.checkEqual(calls, 1, "fallthrough codeowner hits LLM")
     }
 
     // --- Categorization: Direct codeowner → goes to LLM ---
