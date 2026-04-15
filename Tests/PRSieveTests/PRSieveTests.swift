@@ -656,12 +656,19 @@ func runAllTests() async {
     }
 
     // --- Notification filtering logic ---
-    // Notifications should only fire for priority PRs with passing CI
+    // Notifications should only fire for priority PRs with passing CI, not yet notified, not yet reviewed
 
     do {
         // Helper that mirrors NotificationService.notifyIfNeeded filtering
-        func shouldNotify(_ prs: [PullRequest], alreadyNotified: Set<String> = []) -> [PullRequest] {
-            prs.filter { $0.category == .priority && $0.buildStatus == .passed && !alreadyNotified.contains($0.id) }
+        func shouldNotify(_ prs: [PullRequest], alreadyNotified: Set<String> = [], username: String = "") -> [PullRequest] {
+            prs.filter {
+                guard $0.category == .priority && $0.buildStatus == .passed else { return false }
+                guard !alreadyNotified.contains($0.id) else { return false }
+                if !username.isEmpty && $0.reviewers.contains(where: {
+                    $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state != .pending
+                }) { return false }
+                return true
+            }
         }
 
         // Priority + passing CI → notify
@@ -705,6 +712,62 @@ func runAllTests() async {
 
         // Mix of PRs → only matching ones
         t.checkEqual(shouldNotify([pr1, pr2, pr3, pr5]).count, 1, "notify: only priority+passing from mix")
+
+        // Already reviewed (approved) → no notify
+        var pr7 = makePR()
+        pr7.category = .priority
+        pr7.buildStatus = .passed
+        pr7.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
+        t.checkEqual(shouldNotify([pr7], username: "jasonostrander").count, 0, "no notify: already approved")
+
+        // Already reviewed (changes requested) → no notify
+        var pr8 = makePR()
+        pr8.category = .priority
+        pr8.buildStatus = .passed
+        pr8.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .changesRequested)]
+        t.checkEqual(shouldNotify([pr8], username: "jasonostrander").count, 0, "no notify: changes requested")
+
+        // Pending review → still notify
+        var pr9 = makePR()
+        pr9.category = .priority
+        pr9.buildStatus = .passed
+        pr9.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .pending)]
+        t.checkEqual(shouldNotify([pr9], username: "jasonostrander").count, 1, "notify: only pending review")
+
+        // Review dismissed → still notify (needs re-review)
+        var pr10 = makePR()
+        pr10.category = .priority
+        pr10.buildStatus = .passed
+        pr10.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .dismissed)]
+        t.checkEqual(shouldNotify([pr10], username: "jasonostrander").count, 0, "no notify: dismissed counts as reviewed")
+    }
+
+    // --- Notified PR IDs persistence ---
+
+    do {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        if let persistence = try? PersistenceService(directory: dir) {
+            // Initially empty
+            let ids1 = await persistence.loadNotifiedPRIDs()
+            t.checkEqual(ids1.count, 0, "persistence: starts empty")
+
+            // Save and reload
+            let saved: Set<String> = ["owner/repo#1", "owner/repo#2", "owner/repo#3"]
+            await persistence.saveNotifiedPRIDs(saved)
+            let ids2 = await persistence.loadNotifiedPRIDs()
+            t.checkEqual(ids2, saved, "persistence: saves and reloads IDs")
+
+            // Overwrite
+            let updated: Set<String> = ["owner/repo#1"]
+            await persistence.saveNotifiedPRIDs(updated)
+            let ids3 = await persistence.loadNotifiedPRIDs()
+            t.checkEqual(ids3, updated, "persistence: overwrites correctly")
+        } else {
+            t.check(false, "persistence: failed to create PersistenceService with temp dir")
+        }
     }
 
     // --- Reviewed by me detection ---

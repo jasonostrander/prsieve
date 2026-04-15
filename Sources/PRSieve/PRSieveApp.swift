@@ -142,7 +142,7 @@ final class AppState {
 
         if settings.notificationsEnabled {
             if notificationService == nil {
-                notificationService = NotificationService()
+                notificationService = NotificationService(persistence: persistence)
             }
             await notificationService!.requestAuthorization()
             viewModel.notificationService = notificationService

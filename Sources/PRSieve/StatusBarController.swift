@@ -69,19 +69,19 @@ final class StatusBarController: NSObject {
     private func showContextMenu(_ sender: NSStatusBarButton) {
         let menu = NSMenu()
 
-        let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshAction), keyEquivalent: "r")
+        let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshAction), keyEquivalent: "")
         refreshItem.target = self
         menu.addItem(refreshItem)
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(settingsAction), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(settingsAction), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit PRSieve", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit PRSieve", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quitItem)
 
         statusItem.menu = menu

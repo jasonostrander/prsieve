@@ -6,6 +6,7 @@ actor PersistenceService {
     private let pullRequestsURL: URL
     private let tokensURL: URL
     private let codeownersCacheDir: URL
+    private let notifiedIDsURL: URL
 
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -20,13 +21,18 @@ actor PersistenceService {
         return d
     }()
 
-    init() throws {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        appSupportDir = appSupport.appendingPathComponent("PRSieve", isDirectory: true)
+    init(directory: URL? = nil) throws {
+        if let directory {
+            appSupportDir = directory
+        } else {
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            appSupportDir = appSupport.appendingPathComponent("PRSieve", isDirectory: true)
+        }
         settingsURL = appSupportDir.appendingPathComponent("settings.json")
         pullRequestsURL = appSupportDir.appendingPathComponent("pull_requests.json")
         tokensURL = appSupportDir.appendingPathComponent(".tokens.json")
         codeownersCacheDir = appSupportDir.appendingPathComponent("codeowners_cache", isDirectory: true)
+        notifiedIDsURL = appSupportDir.appendingPathComponent("notified_pr_ids.json")
 
         try FileManager.default.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: codeownersCacheDir, withIntermediateDirectories: true)
@@ -90,6 +96,21 @@ actor PersistenceService {
     func savePullRequests(_ prs: [PullRequest]) throws {
         let data = try encoder.encode(prs)
         try data.write(to: pullRequestsURL, options: .atomic)
+    }
+
+    // MARK: - Notified PR IDs
+
+    func loadNotifiedPRIDs() -> Set<String> {
+        guard let data = try? Data(contentsOf: notifiedIDsURL),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(ids)
+    }
+
+    func saveNotifiedPRIDs(_ ids: Set<String>) {
+        guard let data = try? JSONEncoder().encode(Array(ids)) else { return }
+        try? data.write(to: notifiedIDsURL, options: .atomic)
     }
 
     // MARK: - CODEOWNERS Cache

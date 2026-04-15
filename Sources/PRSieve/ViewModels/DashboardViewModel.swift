@@ -103,8 +103,8 @@ final class DashboardViewModel {
             invalidateSummaries()
 
             // Send notifications for new priority PRs with passing CI
-            notificationService?.notifyIfNeeded(prs: pullRequests)
-            notificationService?.pruneNotified(currentPRIDs: Set(pullRequests.map(\.id)))
+            await notificationService?.notifyIfNeeded(prs: pullRequests, username: githubUsername)
+            await notificationService?.pruneNotified(currentPRIDs: Set(pullRequests.map(\.id)))
             // Re-generate summaries for collapsed sections
             for category in collapsedSections {
                 generateSummaryIfNeeded(for: category)
