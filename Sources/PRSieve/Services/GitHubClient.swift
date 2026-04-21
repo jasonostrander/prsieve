@@ -187,6 +187,14 @@ actor GitHubClient {
         }
     }
 
+    // MARK: - Fetch open PRs the user has previously reviewed/commented on
+
+    func fetchReviewedByUser(repo: String, username: String) async throws -> [PullRequest] {
+        let query = "repo:\(repo) is:pr is:open reviewed-by:\(username)"
+        let items = try await searchItems(query: query)
+        return try await fetchDetailsConcurrently(items: items, username: username)
+    }
+
     // MARK: - Lightweight PR state check
 
     /// Fetch only the state of a PR (open/closed/merged) without supplemental data.

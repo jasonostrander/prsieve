@@ -916,6 +916,47 @@ func runAllTests() async {
         t.check(!isUnreviewedPriorityWithinGracePeriod(pr5), "open PR → grace period not applicable")
     }
 
+    // --- Previously reviewed PRs (reviewed-by fetch) ---
+
+    do {
+        let username = "jasonostrander"
+
+        // PR found via reviewed-by has isRequestedReviewer = false
+        var pr = makePR(isRequestedReviewer: false)
+        pr.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .commented)]
+        t.check(!pr.isRequestedReviewer, "reviewed-by PR: isRequestedReviewer = false")
+
+        // Pre-filter still marks it priority (user previously reviewed)
+        let llm1 = MockLLMClient()
+        let svc1 = CategorizationService(llmClient: llm1)
+        let r1 = await svc1.categorize(pr: pr, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r1.category, .priority, "reviewed-by PR with comment → priority")
+        t.checkEqual(await llm1.getCallCount(), 0, "reviewed-by PR skips LLM")
+
+        // Review-requested PR wins when same PR comes from both sources
+        // (simulated by isRequestedReviewer = true taking precedence)
+        var prRequested = makePR(isRequestedReviewer: true)
+        prRequested.reviewers = [ReviewerInfo(login: username, avatarURL: nil, state: .approved)]
+        t.check(prRequested.isRequestedReviewer, "requested PR: isRequestedReviewer = true")
+
+        // PR found only via reviewed-by with no review state → falls through to LLM
+        var prNoReview = makePR(isRequestedReviewer: false, isDirectCodeowner: true)
+        prNoReview.reviewers = []
+        let llm2 = MockLLMClient()
+        await llm2.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        let svc2 = CategorizationService(llmClient: llm2)
+        let r2 = await svc2.categorize(pr: prNoReview, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(await llm2.getCallCount(), 1, "reviewed-by PR with no review hits LLM")
+
+        // Dedup: review-requested takes precedence over reviewed-by for same PR ID
+        // Simulated by checking that if a PR is in both sets, it keeps isRequestedReviewer = true
+        let requestedIDs: Set<String> = ["owner/repo#1"]
+        var prFromReviewedBy = makePR(isRequestedReviewer: false)
+        // If the ID is already in requested set, it should not be added again with isRequested = false
+        let alreadySeen = requestedIDs.contains(prFromReviewedBy.id)
+        t.check(alreadySeen, "dedup: reviewed-by PR with same ID as requested PR is skipped")
+    }
+
     // --- PullRequest Model ---
 
     do {

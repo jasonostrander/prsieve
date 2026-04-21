@@ -60,11 +60,29 @@ actor PollingService {
                 }
             }
 
-            // Fetch review requests
-            let fetchedPRs = try await githubClient.fetchReviewRequests(
+            // Fetch review requests and PRs previously reviewed by user (in parallel)
+            async let requestedPRs = githubClient.fetchReviewRequests(
                 repo: repo,
                 username: settings.githubUsername
             )
+            async let reviewedPRs = githubClient.fetchReviewedByUser(
+                repo: repo,
+                username: settings.githubUsername
+            )
+
+            // Merge: review-requested PRs take precedence; reviewed-by fills in the rest
+            var seenIDs = Set<String>()
+            var mergedPRs: [(pr: PullRequest, isRequested: Bool)] = []
+            for pr in (try await requestedPRs) {
+                if seenIDs.insert(pr.id).inserted {
+                    mergedPRs.append((pr, true))
+                }
+            }
+            for pr in (try await reviewedPRs) {
+                if seenIDs.insert(pr.id).inserted {
+                    mergedPRs.append((pr, false))
+                }
+            }
 
             // Apply overrides and collect PRs needing categorization
             var prsForRepo: [PullRequest] = []
@@ -78,8 +96,8 @@ actor PollingService {
                 return p
             }()
 
-            for var pr in fetchedPRs {
-                pr.isRequestedReviewer = true
+            for (var pr, isRequested) in mergedPRs {
+                pr.isRequestedReviewer = isRequested
 
                 // Check if user is a direct (non-catch-all) codeowner
                 if let parser {
