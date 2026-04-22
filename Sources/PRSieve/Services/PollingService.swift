@@ -153,7 +153,7 @@ actor PollingService {
                         let (nextPrIdx, nextPr) = needsCategorization[idx]
                         idx += 1
                         group.addTask {
-                            let result = await catService.categorize(pr: nextPr, codeowners: codeowners, userContext: userContext)
+                            let result = await catService.categorize(pr: nextPr, codeowners: codeowners, userContext: userContext, username: username)
                             return (nextPrIdx, result)
                         }
                     }
