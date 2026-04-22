@@ -159,6 +159,45 @@ func runAllTests() async {
         filesChanged: ["translations/en.json", "translations/fr.json"]
     )), "translations directory")
 
+    // --- Pre-filter: Own PR ---
+
+    do {
+        let username = "jasonostrander"
+
+        // Own PR, no comments → noise
+        let ownPR = makePR(author: username)
+        let llm1 = MockLLMClient()
+        let r1 = await CategorizationService(llmClient: llm1).categorize(pr: ownPR, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r1.category, .noise, "own PR no comments → noise")
+        t.check(r1.reason.contains("own"), "own PR reason")
+        t.checkEqual(await llm1.getCallCount(), 0, "own PR skips LLM")
+
+        // Own PR, someone requested changes → show (priority/low via LLM)
+        var ownPRWithChanges = makePR(author: username, isDirectCodeowner: true)
+        ownPRWithChanges.reviewers = [ReviewerInfo(login: "alice", avatarURL: nil, state: .changesRequested)]
+        let llm2 = MockLLMClient()
+        await llm2.setResponse(#"{"category": "priority", "reason": "Needs your attention"}"#)
+        let r2 = await CategorizationService(llmClient: llm2).categorize(pr: ownPRWithChanges, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r2.category, .priority, "own PR with changes requested → not noise")
+        t.checkEqual(await llm2.getCallCount(), 1, "own PR with changes requested hits LLM")
+
+        // Own PR, has human comments → show
+        var ownPRWithComments = makePR(author: username, isDirectCodeowner: true)
+        ownPRWithComments.humanCommentCount = 2
+        let llm3 = MockLLMClient()
+        await llm3.setResponse(#"{"category": "priority", "reason": "Has comments"}"#)
+        let r3 = await CategorizationService(llmClient: llm3).categorize(pr: ownPRWithComments, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(r3.category, .priority, "own PR with comments → not noise")
+        t.checkEqual(await llm3.getCallCount(), 1, "own PR with comments hits LLM")
+
+        // Someone else's PR → unaffected by this filter
+        let otherPR = makePR(author: "alice", isDirectCodeowner: true)
+        let llm4 = MockLLMClient()
+        await llm4.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        _ = await CategorizationService(llmClient: llm4).categorize(pr: otherPR, codeowners: nil, userContext: "", username: username)
+        t.checkEqual(await llm4.getCallCount(), 1, "other author's PR hits LLM normally")
+    }
+
     // --- Pre-filter: Targets main/master branch ---
 
     do {

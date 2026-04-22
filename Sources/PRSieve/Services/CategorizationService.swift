@@ -34,6 +34,16 @@ actor CategorizationService {
             return CategorizationResult(category: .noise, reason: "Strings/translations PR")
         }
 
+        // Noise: user's own PR, unless others have commented or requested changes
+        if !username.isEmpty && pr.author.caseInsensitiveCompare(username) == .orderedSame {
+            let othersRequestedChanges = pr.reviewers.contains {
+                $0.login.caseInsensitiveCompare(username) != .orderedSame && $0.state == .changesRequested
+            }
+            if !othersRequestedChanges && pr.humanCommentCount == 0 {
+                return CategorizationResult(category: .noise, reason: "Your own PR")
+            }
+        }
+
         // Pre-filter: targets main/master → always priority
         if ["main", "master"].contains(pr.baseBranch.lowercased()) {
             return CategorizationResult(category: .priority, reason: "Targets \(pr.baseBranch) branch")
