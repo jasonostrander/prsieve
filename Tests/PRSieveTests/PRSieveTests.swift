@@ -66,7 +66,8 @@ func makePR(
     isMentioned: Bool = false,
     isRequestedReviewer: Bool = true,
     isDirectCodeowner: Bool = false,
-    updatedAt: Date = Date()
+    updatedAt: Date = Date(),
+    baseBranch: String = "feature"
 ) -> PullRequest {
     PullRequest(
         repoFullName: "owner/repo",
@@ -80,7 +81,7 @@ func makePR(
         isDraft: isDraft,
         labels: labels,
         headBranch: "feature",
-        baseBranch: "main",
+        baseBranch: baseBranch,
         body: "Some description",
         filesChanged: filesChanged,
         reviewers: [],
@@ -157,6 +158,28 @@ func runAllTests() async {
         title: "Auto update",
         filesChanged: ["translations/en.json", "translations/fr.json"]
     )), "translations directory")
+
+    // --- Pre-filter: Targets main/master branch ---
+
+    do {
+        for branch in ["main", "master", "Main", "MASTER"] {
+            let pr = makePR(baseBranch: branch)
+            let llm = MockLLMClient()
+            let svc = CategorizationService(llmClient: llm)
+            let result = await svc.categorize(pr: pr, codeowners: nil, userContext: "")
+            t.checkEqual(result.category, .priority, "base branch \(branch) → priority")
+            t.check(result.reason.contains(branch) || result.reason.lowercased().contains("master") || result.reason.lowercased().contains("main"), "base branch reason mentions branch")
+            t.checkEqual(await llm.getCallCount(), 0, "base branch \(branch) skips LLM")
+        }
+
+        // Feature branch → falls through to LLM
+        let pr = makePR(isDirectCodeowner: true, baseBranch: "develop")
+        let llm = MockLLMClient()
+        await llm.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
+        let svc = CategorizationService(llmClient: llm)
+        _ = await svc.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(await llm.getCallCount(), 1, "non-main base branch hits LLM")
+    }
 
     // --- Pre-filter: @Mentioned ---
 

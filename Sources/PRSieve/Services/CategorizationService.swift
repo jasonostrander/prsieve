@@ -34,6 +34,11 @@ actor CategorizationService {
             return CategorizationResult(category: .noise, reason: "Strings/translations PR")
         }
 
+        // Pre-filter: targets main/master → always priority
+        if ["main", "master"].contains(pr.baseBranch.lowercased()) {
+            return CategorizationResult(category: .priority, reason: "Targets \(pr.baseBranch) branch")
+        }
+
         // Pre-filter: mentioned in comments → always priority
         if pr.isMentioned {
             return CategorizationResult(category: .priority, reason: "You were @mentioned in comments")
