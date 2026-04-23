@@ -17,6 +17,7 @@ struct AppSettings: Codable, Sendable, Equatable {
     var hideDraftPRs: Bool = true
     var notificationsEnabled: Bool = true
     var keepUnreviewedPriorityAfterMerge: Bool = true
+    var ignoredCIChecks: [String] = ["danger/danger"]
 
     static let `default` = AppSettings()
 
@@ -34,5 +35,6 @@ struct AppSettings: Codable, Sendable, Equatable {
         hideDraftPRs = try container.decodeIfPresent(Bool.self, forKey: .hideDraftPRs) ?? true
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         keepUnreviewedPriorityAfterMerge = try container.decodeIfPresent(Bool.self, forKey: .keepUnreviewedPriorityAfterMerge) ?? true
+        ignoredCIChecks = try container.decodeIfPresent([String].self, forKey: .ignoredCIChecks) ?? ["danger/danger"]
     }
 }

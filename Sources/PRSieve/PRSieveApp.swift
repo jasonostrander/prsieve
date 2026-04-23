@@ -112,8 +112,10 @@ final class AppState {
 
         if let existing = githubClient {
             await existing.updateToken(githubToken)
+            await existing.updateIgnoredCIChecks(settings.ignoredCIChecks)
         } else {
             githubClient = GitHubClient(token: githubToken)
+            await githubClient!.updateIgnoredCIChecks(settings.ignoredCIChecks)
         }
 
         if let existing = buildkiteClient {

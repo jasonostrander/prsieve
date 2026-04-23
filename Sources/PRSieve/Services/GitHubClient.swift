@@ -3,6 +3,7 @@ import Foundation
 actor GitHubClient {
     private let session: URLSession
     private var token: String
+    private var ignoredCIChecks: Set<String> = ["danger/danger"]
     private let baseURL = URL(string: "https://api.github.com")!
 
     private let decoder: JSONDecoder = {
@@ -24,6 +25,10 @@ actor GitHubClient {
 
     func updateToken(_ token: String) {
         self.token = token
+    }
+
+    func updateIgnoredCIChecks(_ checks: [String]) {
+        ignoredCIChecks = Set(checks)
     }
 
     // MARK: - Fetch PRs requesting review from user
@@ -176,12 +181,35 @@ actor GitHubClient {
         do {
             let data = try await fetch(url)
             let status = try decoder.decode(GitHubCombinedStatus.self, from: data)
-            switch status.state {
-            case "success": return .passed
-            case "failure", "error": return .failed
-            case "pending": return status.totalCount == 0 ? .unknown : .running
-            default: return .unknown
+
+            // If no ignored checks configured, use the pre-rolled state from GitHub
+            if ignoredCIChecks.isEmpty {
+                switch status.state {
+                case "success": return .passed
+                case "failure", "error": return .failed
+                case "pending": return status.totalCount == 0 ? .unknown : .running
+                default: return .unknown
+                }
             }
+
+            // Filter out ignored checks and recompute state from the remaining ones
+            let relevant = status.statuses.filter { !ignoredCIChecks.contains($0.context) }
+
+            if relevant.isEmpty {
+                // All checks were ignored (or no checks at all)
+                return status.statuses.isEmpty ? .unknown : .passed
+            }
+
+            if relevant.contains(where: { $0.state == "failure" || $0.state == "error" }) {
+                return .failed
+            }
+            if relevant.contains(where: { $0.state == "pending" }) {
+                return .running
+            }
+            if relevant.allSatisfy({ $0.state == "success" }) {
+                return .passed
+            }
+            return .unknown
         } catch {
             return .unknown
         }
@@ -397,4 +425,21 @@ struct GitHubPRState: Decodable, Sendable {
 struct GitHubCombinedStatus: Decodable, Sendable {
     let state: String  // "success", "failure", "error", "pending"
     let totalCount: Int
+    let statuses: [GitHubStatusContext]
+
+    enum CodingKeys: String, CodingKey {
+        case state, statuses, totalCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(String.self, forKey: .state)
+        totalCount = try container.decode(Int.self, forKey: .totalCount)
+        statuses = try container.decodeIfPresent([GitHubStatusContext].self, forKey: .statuses) ?? []
+    }
+}
+
+struct GitHubStatusContext: Decodable, Sendable {
+    let state: String   // "success", "failure", "error", "pending"
+    let context: String // e.g. "Buildkite", "danger/danger"
 }

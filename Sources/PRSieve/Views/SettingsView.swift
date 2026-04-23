@@ -133,7 +133,30 @@ struct SettingsView: View {
             Section("Notifications") {
                 Toggle("Notify when priority PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
             }
+
+            Section {
+                TextField("e.g. danger/danger, lint", text: ignoredCIChecksText)
+                    .help("Comma-separated check names to ignore when computing CI status")
+            } header: {
+                Text("Ignored CI Checks")
+            } footer: {
+                Text("If all remaining checks pass, CI is considered green.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var ignoredCIChecksText: Binding<String> {
+        Binding(
+            get: { viewModel.settings.ignoredCIChecks.joined(separator: ", ") },
+            set: {
+                viewModel.settings.ignoredCIChecks = $0
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }
+        )
     }
 }
