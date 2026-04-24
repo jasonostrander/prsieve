@@ -1019,6 +1019,81 @@ func runAllTests() async {
         t.check(alreadySeen, "dedup: reviewed-by PR with same ID as requested PR is skipped")
     }
 
+    // --- Category override persistence ---
+
+    do {
+        let overriddenAt = Date()
+        let beforeOverride = overriddenAt.addingTimeInterval(-3600) // 1 hour before override
+        let afterOverride = overriddenAt.addingTimeInterval(3600)   // 1 hour after override
+
+        // Override kept when PR has not been updated since override was set
+        var existing = makePR(updatedAt: beforeOverride)
+        existing.category = .noise
+        existing.categoryOverridden = true
+        existing.categoryReason = "Manually set to Noise"
+        existing.lastCategorizedAt = overriddenAt
+
+        var fresh = makePR(updatedAt: beforeOverride)
+        fresh.isFlagged = existing.isFlagged
+        if existing.categoryOverridden,
+           let oa = existing.lastCategorizedAt,
+           fresh.updatedAt <= oa {
+            fresh.category = existing.category
+            fresh.categoryOverridden = true
+            fresh.categoryReason = existing.categoryReason
+            fresh.lastCategorizedAt = existing.lastCategorizedAt
+        }
+        t.checkEqual(fresh.category, .noise, "override kept when PR unchanged")
+        t.check(fresh.categoryOverridden, "categoryOverridden stays true when PR unchanged")
+
+        // Override reset when PR has been updated after override was set
+        var existingStale = makePR(updatedAt: afterOverride)
+        existingStale.category = .noise
+        existingStale.categoryOverridden = true
+        existingStale.lastCategorizedAt = overriddenAt
+
+        var freshUpdated = makePR(updatedAt: afterOverride)
+        freshUpdated.isFlagged = existingStale.isFlagged
+        if existingStale.categoryOverridden,
+           let oa = existingStale.lastCategorizedAt,
+           freshUpdated.updatedAt <= oa {
+            freshUpdated.category = existingStale.category
+            freshUpdated.categoryOverridden = true
+        }
+        // updatedAt > overriddenAt → override should NOT have been applied
+        t.check(!freshUpdated.categoryOverridden, "override reset when PR updated after override")
+
+        // Override kept when PR updatedAt exactly equals overriddenAt
+        var existingExact = makePR(updatedAt: overriddenAt)
+        existingExact.category = .priority
+        existingExact.categoryOverridden = true
+        existingExact.lastCategorizedAt = overriddenAt
+
+        var freshExact = makePR(updatedAt: overriddenAt)
+        if existingExact.categoryOverridden,
+           let oa = existingExact.lastCategorizedAt,
+           freshExact.updatedAt <= oa {
+            freshExact.category = existingExact.category
+            freshExact.categoryOverridden = true
+        }
+        t.checkEqual(freshExact.category, .priority, "override kept when updatedAt == overriddenAt")
+
+        // No override when lastCategorizedAt is nil (legacy data)
+        var existingNoDate = makePR()
+        existingNoDate.category = .noise
+        existingNoDate.categoryOverridden = true
+        existingNoDate.lastCategorizedAt = nil
+
+        var freshNoDate = makePR()
+        if existingNoDate.categoryOverridden,
+           let oa = existingNoDate.lastCategorizedAt,
+           freshNoDate.updatedAt <= oa {
+            freshNoDate.category = existingNoDate.category
+            freshNoDate.categoryOverridden = true
+        }
+        t.check(!freshNoDate.categoryOverridden, "override with nil lastCategorizedAt is not applied")
+    }
+
     // --- PullRequest Model ---
 
     do {

@@ -109,12 +109,16 @@ actor PollingService {
 
                 if let existing = existingByID[pr.id] {
                     pr.isFlagged = existing.isFlagged
-                    if existing.categoryOverridden {
+                    if existing.categoryOverridden,
+                       let overriddenAt = existing.lastCategorizedAt,
+                       pr.updatedAt <= overriddenAt {
+                        // PR hasn't changed since override was set — keep it
                         pr.category = existing.category
                         pr.categoryOverridden = true
                         pr.categoryReason = existing.categoryReason
                         pr.lastCategorizedAt = existing.lastCategorizedAt
                     }
+                    // else: PR updated after override → re-categorize
                 }
 
                 let idx = prsForRepo.count
@@ -189,7 +193,9 @@ actor PollingService {
                         var pr = refreshed
                         pr.isRequestedReviewer = true
                         pr.isFlagged = existing.isFlagged
-                        if existing.categoryOverridden {
+                        if existing.categoryOverridden,
+                           let overriddenAt = existing.lastCategorizedAt,
+                           pr.updatedAt <= overriddenAt {
                             pr.category = existing.category
                             pr.categoryOverridden = true
                             pr.categoryReason = existing.categoryReason
