@@ -130,6 +130,10 @@ struct SettingsView: View {
                 Toggle("Keep unreviewed priority PRs visible for 3 days after merge", isOn: $viewModel.settings.keepUnreviewedPriorityAfterMerge)
             }
 
+            Section("Startup") {
+                Toggle("Launch at login", isOn: launchAtLoginBinding)
+            }
+
             Section("Notifications") {
                 Toggle("Notify when priority PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
             }
@@ -156,6 +160,16 @@ struct SettingsView: View {
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings.launchAtLogin },
+            set: { newValue in
+                let actual = LaunchAtLoginService.setEnabled(newValue)
+                viewModel.settings.launchAtLogin = actual
             }
         )
     }

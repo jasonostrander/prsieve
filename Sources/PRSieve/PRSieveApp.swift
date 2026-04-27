@@ -106,6 +106,9 @@ final class AppState {
         viewModel.hideDrafts = settings.hideDraftPRs
         viewModel.githubUsername = settings.githubUsername
         viewModel.keepUnreviewedPriorityAfterMerge = settings.keepUnreviewedPriorityAfterMerge
+
+        // Sync launch-at-login registration with the saved setting
+        LaunchAtLoginService.setEnabled(settings.launchAtLogin)
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""
