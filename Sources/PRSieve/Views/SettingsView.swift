@@ -87,15 +87,14 @@ struct SettingsView: View {
     // MARK: - Prompt Tab
 
     private var promptTab: some View {
-        let defaultModel = LLMConfig.loadFromBundle().model
-        return Form {
+        Form {
             Section {
-                TextField(defaultModel.isEmpty ? "Model name" : defaultModel, text: $viewModel.settings.llmModel)
+                TextField("Model name", text: $viewModel.settings.llmModel)
                     .font(.body.monospaced())
             } header: {
                 Text("Model")
             } footer: {
-                Text(defaultModel.isEmpty ? "Enter the model name to use for categorization." : "Leave blank to use the default: \(defaultModel)")
+                Text("The model used for PR categorization.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -17,6 +17,9 @@ final class SettingsViewModel {
     func load() async {
         settings = await persistence.loadSettings()
         githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
+        if settings.llmModel.isEmpty {
+            settings.llmModel = LLMConfig.loadFromBundle().model
+        }
     }
 
     func save() async {
