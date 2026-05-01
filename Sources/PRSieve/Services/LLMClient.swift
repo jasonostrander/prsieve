@@ -53,7 +53,7 @@ actor LLMClient: LLMProvider {
     }
 
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
-        guard !endpoint.isEmpty, !apiKey.isEmpty else {
+        guard !endpoint.isEmpty else {
             throw LLMError.notConfigured
         }
 
@@ -74,7 +74,9 @@ actor LLMClient: LLMProvider {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
