@@ -36,23 +36,27 @@ final class StatusBarController: NSObject {
     }
 
     private func updateIcon() {
-        let hasPriority = withObservationTracking {
-            viewModel.priority.contains { $0.buildStatus == .passed }
+        let (hasPriority, hasLLMError) = withObservationTracking {
+            (
+                viewModel.priority.contains { $0.buildStatus == .passed },
+                viewModel.llmError != nil
+            )
         } onChange: { [weak self] in
             Task { @MainActor in self?.updateIcon() }
         }
 
         guard let button = statusItem.button else { return }
 
-        let symbolName = hasPriority
-            ? "line.3.horizontal.decrease.circle.fill"
-            : "line.3.horizontal.decrease.circle"
-
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "PRSieve")
-        if hasPriority {
+        if hasLLMError {
+            let image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle.fill", accessibilityDescription: "PRSieve — LLM error")
+            let config = NSImage.SymbolConfiguration(paletteColors: [.white, .systemRed])
+            button.image = image?.withSymbolConfiguration(config)
+        } else if hasPriority {
+            let image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle.fill", accessibilityDescription: "PRSieve — priority PRs ready")
             let config = NSImage.SymbolConfiguration(paletteColors: [.white, .systemOrange])
             button.image = image?.withSymbolConfiguration(config)
         } else {
+            let image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle", accessibilityDescription: "PRSieve")
             button.image = image
         }
     }

@@ -1149,6 +1149,95 @@ func runAllTests() async {
         t.checkEqual(pr.ageDescription, "1h", "age description")
     }
 
+    // --- CategorizationService: LLM error tracking ---
+
+    do {
+        // LLM error is captured and consumable after a failed categorization
+        let throwingLLM = MockLLMClient()
+        await throwingLLM.setShouldThrow(true)
+        let service = CategorizationService(llmClient: throwingLLM)
+        let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: false)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result.category, .low, "LLM error → fallback to low")
+        let err = await service.consumeLastLLMError()
+        t.check(err != nil, "LLM error is captured after failure")
+
+        // consumeLastLLMError clears the error (idempotent)
+        let err2 = await service.consumeLastLLMError()
+        t.check(err2 == nil, "consumeLastLLMError clears error")
+    }
+
+    do {
+        // Successful LLM call leaves no error
+        let goodLLM = MockLLMClient()
+        await goodLLM.setResponse(#"{"category": "priority", "reason": "Owns this"}"#)
+        let service = CategorizationService(llmClient: goodLLM)
+        let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: true)
+        _ = await service.categorize(pr: pr, codeowners: nil, userContext: "owns cart")
+        let err = await service.consumeLastLLMError()
+        t.check(err == nil, "no LLM error after successful call")
+    }
+
+    do {
+        // Pre-filter (no LLM call) leaves no error
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isDraft: true)
+        _ = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        let err = await service.consumeLastLLMError()
+        t.check(err == nil, "pre-filtered PR leaves no LLM error")
+        t.checkEqual(await llm.getCallCount(), 0, "pre-filtered PR hits no LLM")
+    }
+
+    // --- DashboardViewModel: llmErrorDescription ---
+
+    do {
+        // Helper to build a ViewModel-like description switch
+        func describe(_ error: LLMError) -> (title: String, suggestion: String) {
+            switch error {
+            case .notConfigured:
+                return ("LLM not configured", "Set a model name in Settings → Prompt.")
+            case .requestFailed(let msg):
+                let lower = msg.lowercased()
+                if lower.contains("401") || lower.contains("unauthorized") {
+                    return ("LLM authentication failed", "Check the API key in llm_config.json.")
+                } else if lower.contains("404") || lower.contains("not found") {
+                    return ("LLM model not found", "Check the model name in Settings → Prompt.")
+                } else if lower.contains("429") || lower.contains("rate limit") {
+                    return ("LLM rate limit reached", "Wait a moment, then refresh.")
+                } else if lower.contains("connection refused") || lower.contains("network") {
+                    return ("LLM connection failed", "Check the endpoint URL in llm_config.json.")
+                } else {
+                    return ("LLM request failed", "Check your endpoint and API key in llm_config.json.")
+                }
+            case .emptyResponse:
+                return ("LLM returned no response", "Check the model name in Settings → Prompt.")
+            }
+        }
+
+        let notConfigured = describe(.notConfigured)
+        t.check(notConfigured.title.contains("not configured"), "notConfigured title")
+        t.check(notConfigured.suggestion.contains("model"), "notConfigured suggestion mentions model")
+
+        let auth401 = describe(.requestFailed("HTTP 401 Unauthorized"))
+        t.check(auth401.title.contains("authentication"), "401 → auth error title")
+        t.check(auth401.suggestion.contains("API key"), "401 suggestion mentions API key")
+
+        let notFound = describe(.requestFailed("404 model not found"))
+        t.check(notFound.title.contains("model not found"), "404 → model not found title")
+
+        let rateLimit = describe(.requestFailed("429 rate limit exceeded"))
+        t.check(rateLimit.title.contains("rate limit"), "429 → rate limit title")
+
+        let empty = describe(.emptyResponse)
+        t.check(empty.title.contains("no response"), "emptyResponse title")
+        t.check(empty.suggestion.contains("model"), "emptyResponse suggestion mentions model")
+
+        let generic = describe(.requestFailed("Internal server error 500"))
+        t.check(generic.title.contains("failed"), "generic failure title")
+        t.check(generic.suggestion.contains("endpoint"), "generic suggestion mentions endpoint")
+    }
+
     // --- AppSettings: llmModel persistence ---
 
     do {

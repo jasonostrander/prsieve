@@ -7,6 +7,7 @@ final class DashboardViewModel {
     var isInitialLoad = true
     var lastRefresh: Date?
     var error: String?
+    var llmError: LLMError?
     var searchText = ""
     var showMerged = false
     var showReadyToMerge = false
@@ -39,6 +40,30 @@ final class DashboardViewModel {
     }
 
     var totalCount: Int { priority.count + low.count + noise.count + reviewed.count }
+
+    var llmErrorDescription: (title: String, suggestion: String)? {
+        switch llmError {
+        case .notConfigured:
+            return ("LLM not configured", "Set a model name in Settings → Prompt.")
+        case .requestFailed(let msg):
+            let lower = msg.lowercased()
+            if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid_api_key") || lower.contains("authentication") {
+                return ("LLM authentication failed", "Check the API key in llm_config.json.")
+            } else if lower.contains("404") || lower.contains("not found") {
+                return ("LLM model not found", "Check the model name in Settings → Prompt.")
+            } else if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many") {
+                return ("LLM rate limit reached", "Wait a moment, then refresh.")
+            } else if lower.contains("connection refused") || lower.contains("could not connect") || lower.contains("network") || lower.contains("offline") {
+                return ("LLM connection failed", "Check the endpoint URL in llm_config.json.")
+            } else {
+                return ("LLM request failed", "Check your endpoint and API key in llm_config.json.")
+            }
+        case .emptyResponse:
+            return ("LLM returned no response", "Check the model name in Settings → Prompt.")
+        case .none:
+            return nil
+        }
+    }
 
     private func isReviewedByMe(_ pr: PullRequest) -> Bool {
         guard !githubUsername.isEmpty else { return false }
@@ -97,7 +122,9 @@ final class DashboardViewModel {
         isLoading = true
         error = nil
         do {
-            pullRequests = try await pollingService.refresh()
+            let result = try await pollingService.refresh()
+            pullRequests = result.prs
+            llmError = result.llmError
             lastRefresh = Date()
             isInitialLoad = false
             invalidateSummaries()

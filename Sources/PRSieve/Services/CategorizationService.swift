@@ -2,9 +2,15 @@ import Foundation
 
 actor CategorizationService {
     private let llmClient: any LLMProvider
+    private var lastLLMError: LLMError?
 
     init(llmClient: any LLMProvider) {
         self.llmClient = llmClient
+    }
+
+    func consumeLastLLMError() -> LLMError? {
+        defer { lastLLMError = nil }
+        return lastLLMError
     }
 
     struct CategorizationResult: Sendable {
@@ -59,11 +65,18 @@ actor CategorizationService {
         // Everything else → LLM
         do {
             return try await llmCategorize(pr: pr, codeowners: codeowners, userContext: userContext)
+        } catch let err as LLMError {
+            lastLLMError = err
+            return CategorizationResult(
+                category: .low,
+                reason: pr.isRequestedReviewer ? "LLM unavailable — defaulting to low" : "LLM unavailable"
+            )
         } catch {
-            if pr.isRequestedReviewer {
-                return CategorizationResult(category: .low, reason: "LLM unavailable — defaulting to low")
-            }
-            return CategorizationResult(category: .low, reason: "LLM unavailable")
+            lastLLMError = .requestFailed(error.localizedDescription)
+            return CategorizationResult(
+                category: .low,
+                reason: pr.isRequestedReviewer ? "LLM unavailable — defaulting to low" : "LLM unavailable"
+            )
         }
     }
 

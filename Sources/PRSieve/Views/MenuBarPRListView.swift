@@ -93,6 +93,10 @@ struct MenuBarPRListView: View {
 
             Divider()
 
+            if let llm = viewModel.llmErrorDescription {
+                llmErrorBanner(llm)
+            }
+
             // PR list
             PRListContent(viewModel: viewModel, compact: true)
 
@@ -130,6 +134,41 @@ struct MenuBarPRListView: View {
         }
         .frame(width: 420, height: 580)
         .focusEffectDisabled()
+    }
+
+    private func llmErrorBanner(_ info: (title: String, suggestion: String)) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(info.title)
+                    .font(.caption.weight(.semibold))
+                Text(info.suggestion)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                onOpenSettings?()
+            } label: {
+                Text("Settings")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            Button {
+                viewModel.llmError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.red.opacity(0.07))
     }
 
     private var subtitleText: String {

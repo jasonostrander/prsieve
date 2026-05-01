@@ -1,5 +1,10 @@
 import Foundation
 
+struct RefreshResult: Sendable {
+    let prs: [PullRequest]
+    let llmError: LLMError?
+}
+
 actor PollingService {
     private let persistence: PersistenceService
     private let githubClient: GitHubClient
@@ -28,8 +33,8 @@ actor PollingService {
     }
 
     /// Perform a full refresh: fetch PRs, categorize new ones, fetch build status.
-    func refresh() async throws -> [PullRequest] {
-        guard !settings.githubUsername.isEmpty else { return [] }
+    func refresh() async throws -> RefreshResult {
+        guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil) }
 
         let existingPRs = await persistence.loadPullRequests()
         var existingByID: [String: PullRequest] = [:]
@@ -230,6 +235,7 @@ actor PollingService {
         // Save
         try await persistence.savePullRequests(allPRs)
 
-        return allPRs
+        let llmError = await categorizationService.consumeLastLLMError()
+        return RefreshResult(prs: allPRs, llmError: llmError)
     }
 }

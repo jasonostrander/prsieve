@@ -61,8 +61,13 @@ struct DashboardView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let error = viewModel.error {
-                errorBanner(error)
+            VStack(spacing: 4) {
+                if let llm = viewModel.llmErrorDescription {
+                    llmErrorBanner(llm, onSettings: { showSettings = true })
+                }
+                if let error = viewModel.error {
+                    errorBanner(error)
+                }
             }
         }
     }
@@ -80,6 +85,38 @@ struct DashboardView: View {
             }
             .buttonStyle(.borderedProminent)
         }
+    }
+
+    private func llmErrorBanner(_ info: (title: String, suggestion: String), onSettings: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(info.title)
+                    .font(.caption.weight(.semibold))
+                Text(info.suggestion)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Settings") { onSettings() }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.red)
+            Button {
+                viewModel.llmError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal)
+        .padding(.bottom, 4)
     }
 
     private func errorBanner(_ message: String) -> some View {
