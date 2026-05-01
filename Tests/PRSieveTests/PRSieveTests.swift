@@ -1112,6 +1112,34 @@ func runAllTests() async {
         t.check(!freshNoDate.categoryOverridden, "override with nil lastCategorizedAt is not applied")
     }
 
+    // --- LLMClient: API key is optional ---
+
+    do {
+        // Empty endpoint → notConfigured (regardless of apiKey)
+        let noEndpoint = LLMClient(endpoint: "", apiKey: "some-key", model: "gpt-4o-mini")
+        do {
+            _ = try await noEndpoint.complete(systemPrompt: "x", userPrompt: "y")
+            t.check(false, "empty endpoint should throw")
+        } catch let LLMError.notConfigured {
+            t.check(true, "empty endpoint throws notConfigured")
+        } catch {
+            t.check(false, "empty endpoint threw wrong error: \(error)")
+        }
+
+        // Empty apiKey with valid endpoint → does NOT throw notConfigured
+        // (http://127.0.0.1:1 will refuse the connection, producing requestFailed)
+        let noKey = LLMClient(endpoint: "http://127.0.0.1:1", apiKey: "", model: "gpt-4o-mini")
+        do {
+            _ = try await noKey.complete(systemPrompt: "x", userPrompt: "y")
+            t.check(false, "127.0.0.1:1 should fail to connect")
+        } catch LLMError.notConfigured {
+            t.check(false, "empty apiKey must NOT throw notConfigured")
+        } catch {
+            // Any other error is fine — we proved the guard let us past notConfigured
+            t.check(true, "empty apiKey is allowed; got expected network error")
+        }
+    }
+
     // --- PullRequest Model ---
 
     do {
