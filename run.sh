@@ -5,6 +5,10 @@ APP_NAME="PRSieve"
 BUILD_DIR=".build/debug"
 BUNDLE_DIR=".build/${APP_NAME}.app"
 
+# Generate build info (git hash + build date), reset on exit
+./scripts/generate_build_info.sh
+trap "git checkout -- Sources/PRSieve/BuildInfo.swift 2>/dev/null || true" EXIT
+
 # Build
 swift build
 

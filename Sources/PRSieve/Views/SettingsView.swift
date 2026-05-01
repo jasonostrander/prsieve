@@ -32,6 +32,10 @@ struct SettingsView: View {
             Divider()
 
             HStack {
+                Text(versionText)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -162,6 +166,10 @@ struct SettingsView: View {
                     .filter { !$0.isEmpty }
             }
         )
+    }
+
+    private var versionText: String {
+        "\(BuildInfo.gitHash) · \(BuildInfo.buildDate)"
     }
 
     private var launchAtLoginBinding: Binding<Bool> {

@@ -7,6 +7,10 @@ DIST_DIR="dist"
 BUNDLE_DIR="$DIST_DIR/${APP_NAME}.app"
 DMG_PATH="$DIST_DIR/${APP_NAME}.dmg"
 
+# Generate build info (git hash + build date), reset on exit
+./scripts/generate_build_info.sh
+trap "git checkout -- Sources/PRSieve/BuildInfo.swift 2>/dev/null || true" EXIT
+
 # Build in release mode
 swift build -c release
 
