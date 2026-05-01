@@ -458,15 +458,40 @@ func runAllTests() async {
     }
 
     do {
-        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","llmEndpoint":"","llmModel":"gpt-4o-mini","codeownerContext":"","pollingIntervalSeconds":300,"notificationsEnabled":true}"#
+        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","codeownerContext":"","pollingIntervalSeconds":300,"notificationsEnabled":true}"#
         let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
         t.checkEqual(decoded.hideDraftPRs, true, "hideDraftPRs defaults when missing from JSON")
     }
 
     do {
-        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","llmEndpoint":"","llmModel":"gpt-4o-mini","codeownerContext":"","pollingIntervalSeconds":300,"hideDraftPRs":false,"notificationsEnabled":true}"#
+        let json = #"{"githubUsername":"","repos":[],"buildkiteOrgSlug":"","codeownerContext":"","pollingIntervalSeconds":300,"hideDraftPRs":false,"notificationsEnabled":true}"#
         let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
         t.checkEqual(decoded.hideDraftPRs, false, "hideDraftPRs can be set to false")
+    }
+
+    // --- AppSettings: legacy JSON with stripped LLM keys decodes cleanly ---
+
+    do {
+        let json = #"{"githubUsername":"alice","repos":[],"buildkiteOrgSlug":"","llmEndpoint":"https://old","llmModel":"gpt-4","codeownerContext":"x","pollingIntervalSeconds":300,"hideDraftPRs":true,"notificationsEnabled":true}"#
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.githubUsername, "alice", "legacy JSON with old llm keys still decodes")
+        t.checkEqual(decoded.codeownerContext, "x", "legacy JSON preserves codeownerContext")
+    }
+
+    // --- LLMConfig: missing bundle resource → empty config ---
+
+    do {
+        let config = LLMConfig.loadFromBundle()
+        // In the test runner, no bundle resource exists, so the empty config is returned.
+        t.checkEqual(config, LLMConfig.empty, "no bundled config → empty config")
+    }
+
+    do {
+        let json = #"{"endpoint":"https://api.openai.com/v1","apiKey":"sk-abc","model":"gpt-4o-mini"}"#
+        let decoded = try! JSONDecoder().decode(LLMConfig.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.endpoint, "https://api.openai.com/v1", "config endpoint decoded")
+        t.checkEqual(decoded.apiKey, "sk-abc", "config apiKey decoded")
+        t.checkEqual(decoded.model, "gpt-4o-mini", "config model decoded")
     }
 
     // --- Priority + CI indicator logic ---

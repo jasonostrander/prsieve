@@ -111,7 +111,7 @@ final class AppState {
         LaunchAtLoginService.setEnabled(settings.launchAtLogin)
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
-        let llmAPIKey = await persistence.loadToken(forKey: "llm_api_key") ?? ""
+        let llmConfig = LLMConfig.loadFromBundle()
 
         if let existing = githubClient {
             await existing.updateToken(githubToken)
@@ -128,9 +128,9 @@ final class AppState {
         }
 
         if let existing = llmClient {
-            await existing.updateConfig(endpoint: settings.llmEndpoint, apiKey: llmAPIKey, model: settings.llmModel)
+            await existing.updateConfig(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: llmConfig.model)
         } else {
-            llmClient = LLMClient(endpoint: settings.llmEndpoint, apiKey: llmAPIKey, model: settings.llmModel)
+            llmClient = LLMClient(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: llmConfig.model)
         }
 
         let categorizationService = CategorizationService(llmClient: llmClient!)

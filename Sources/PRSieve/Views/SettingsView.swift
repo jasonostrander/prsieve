@@ -9,7 +9,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             Picker("", selection: $selectedTab) {
                 Label("GitHub", systemImage: "person.crop.circle").tag(0)
-                Label("LLM", systemImage: "brain").tag(1)
+                Label("Prompt", systemImage: "text.bubble").tag(1)
                 Label("Preferences", systemImage: "gearshape").tag(2)
             }
             .pickerStyle(.segmented)
@@ -23,7 +23,7 @@ struct SettingsView: View {
             Group {
                 switch selectedTab {
                 case 0: githubTab
-                case 1: llmTab
+                case 1: promptTab
                 default: preferencesTab
                 }
             }
@@ -49,9 +49,6 @@ struct SettingsView: View {
             Task { await viewModel.save() }
         }
         .onChange(of: viewModel.githubToken) { _, _ in
-            Task { await viewModel.save() }
-        }
-        .onChange(of: viewModel.llmAPIKey) { _, _ in
             Task { await viewModel.save() }
         }
     }
@@ -87,26 +84,17 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    // MARK: - LLM Tab
+    // MARK: - Prompt Tab
 
-    private var llmTab: some View {
+    private var promptTab: some View {
         Form {
-            Section("OpenAI-Compatible API") {
-                TextField("Endpoint URL", text: $viewModel.settings.llmEndpoint)
-                    .help("Base URL for the chat completions API (e.g., https://api.openai.com/v1)")
-                SecureField("API Key", text: $viewModel.llmAPIKey)
-                    .textContentType(.password)
-                TextField("Model", text: $viewModel.settings.llmModel)
-                    .help("Model name (e.g., gpt-4o-mini)")
-            }
-
             Section {
                 Text("Describe what code you own or maintain. Focus on your areas of responsibility — the LLM handles categorization logic and PR age separately.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 4)
                 TextEditor(text: $viewModel.settings.codeownerContext)
-                    .frame(minHeight: 160)
+                    .frame(minHeight: 220)
                     .font(.body.monospaced())
             } header: {
                 Text("Your Code Ownership Context")

@@ -26,6 +26,14 @@ cp "$BUILD_DIR/$APP_NAME" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 cp resources/Info.plist "$BUNDLE_DIR/Contents/Info.plist"
 cp resources/AppIcon.icns "$BUNDLE_DIR/Contents/Resources/AppIcon.icns"
 
+# Copy LLM config (gitignored; falls back to example template)
+if [[ -f llm_config.json ]]; then
+  cp llm_config.json "$BUNDLE_DIR/Contents/Resources/llm_config.json"
+elif [[ -f llm_config.example.json ]]; then
+  echo "warning: llm_config.json not found, bundling llm_config.example.json (LLM will be disabled until apiKey is set)"
+  cp llm_config.example.json "$BUNDLE_DIR/Contents/Resources/llm_config.json"
+fi
+
 # Ad-hoc code sign
 codesign --force --deep --sign - "$BUNDLE_DIR"
 
