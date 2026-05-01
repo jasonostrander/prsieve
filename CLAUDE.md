@@ -11,13 +11,17 @@ macOS menu bar app for triaging GitHub PR review requests. Uses an LLM to catego
 
 ## Build & Run
 
+First-time setup: copy `llm_config.example.json` to `llm_config.json` and fill in the endpoint/apiKey/model. The file is gitignored. `run.sh`/`release.sh` will warn and fall back to the example if it's missing (LLM will be disabled until apiKey is set).
+
 ```bash
+cp llm_config.example.json llm_config.json   # one-time, then edit
 ./run.sh          # builds, bundles .app, and launches
 swift build       # build only
 ./test.sh         # compile and run tests (no Xcode/XCTest needed)
+./release.sh      # builds release .app and packages dist/PRSieve.dmg
 ```
 
-The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running.
+The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns + llm_config.json into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running.
 
 To regenerate the app icon: `swift resources/generate_icon.swift`
 
