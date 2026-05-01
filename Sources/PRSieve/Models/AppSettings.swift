@@ -11,6 +11,7 @@ struct AppSettings: Codable, Sendable, Equatable {
     var repos: [RepoConfig] = []
     var buildkiteOrgSlug: String = ""
     var codeownerContext: String = ""
+    var llmModel: String = ""
     var pollingIntervalSeconds: Int = 300
     var hideDraftPRs: Bool = true
     var notificationsEnabled: Bool = true
@@ -28,6 +29,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         repos = try container.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
         buildkiteOrgSlug = try container.decodeIfPresent(String.self, forKey: .buildkiteOrgSlug) ?? ""
         codeownerContext = try container.decodeIfPresent(String.self, forKey: .codeownerContext) ?? ""
+        llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         pollingIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollingIntervalSeconds) ?? 300
         hideDraftPRs = try container.decodeIfPresent(Bool.self, forKey: .hideDraftPRs) ?? true
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true

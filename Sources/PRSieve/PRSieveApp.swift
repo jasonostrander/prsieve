@@ -127,10 +127,11 @@ final class AppState {
             buildkiteClient = BuildkiteClient(token: buildkiteToken, orgSlug: settings.buildkiteOrgSlug)
         }
 
+        let effectiveModel = settings.llmModel.isEmpty ? llmConfig.model : settings.llmModel
         if let existing = llmClient {
-            await existing.updateConfig(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: llmConfig.model)
+            await existing.updateConfig(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: effectiveModel)
         } else {
-            llmClient = LLMClient(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: llmConfig.model)
+            llmClient = LLMClient(endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, model: effectiveModel)
         }
 
         let categorizationService = CategorizationService(llmClient: llmClient!)

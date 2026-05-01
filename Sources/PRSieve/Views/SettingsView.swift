@@ -87,14 +87,26 @@ struct SettingsView: View {
     // MARK: - Prompt Tab
 
     private var promptTab: some View {
-        Form {
+        let defaultModel = LLMConfig.loadFromBundle().model
+        return Form {
+            Section {
+                TextField(defaultModel.isEmpty ? "Model name" : defaultModel, text: $viewModel.settings.llmModel)
+                    .font(.body.monospaced())
+            } header: {
+                Text("Model")
+            } footer: {
+                Text(defaultModel.isEmpty ? "Enter the model name to use for categorization." : "Leave blank to use the default: \(defaultModel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Text("Describe what code you own or maintain. Focus on your areas of responsibility — the LLM handles categorization logic and PR age separately.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 4)
                 TextEditor(text: $viewModel.settings.codeownerContext)
-                    .frame(minHeight: 220)
+                    .frame(minHeight: 180)
                     .font(.body.monospaced())
             } header: {
                 Text("Your Code Ownership Context")

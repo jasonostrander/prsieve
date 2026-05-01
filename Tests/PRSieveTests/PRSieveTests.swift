@@ -1149,6 +1149,56 @@ func runAllTests() async {
         t.checkEqual(pr.ageDescription, "1h", "age description")
     }
 
+    // --- AppSettings: llmModel persistence ---
+
+    do {
+        // Default llmModel is empty (use bundle default)
+        let defaults = AppSettings.default
+        t.checkEqual(defaults.llmModel, "", "default llmModel is empty")
+
+        // Round-trip through JSON preserves llmModel
+        var settings = AppSettings.default
+        settings.llmModel = "claude-opus-4-5"
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        if let data = try? encoder.encode(settings),
+           let decoded = try? decoder.decode(AppSettings.self, from: data) {
+            t.checkEqual(decoded.llmModel, "claude-opus-4-5", "llmModel survives JSON round-trip")
+        } else {
+            t.check(false, "llmModel: JSON round-trip failed")
+        }
+
+        // Missing llmModel in JSON falls back to empty string (backward compat)
+        let legacyJSON = #"{"githubUsername":"alice","repos":[],"pollingIntervalSeconds":300}"#
+        if let data = legacyJSON.data(using: .utf8),
+           let legacy = try? decoder.decode(AppSettings.self, from: data) {
+            t.checkEqual(legacy.llmModel, "", "missing llmModel in legacy JSON → empty string")
+        } else {
+            t.check(false, "llmModel: legacy JSON decode failed")
+        }
+
+        // PersistenceService saves and reloads llmModel
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-llmmodel-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        if let persistence = try? PersistenceService(directory: dir) {
+            var s = AppSettings.default
+            s.llmModel = "gpt-4o-mini"
+            try? await persistence.saveSettings(s)
+            let loaded = await persistence.loadSettings()
+            t.checkEqual(loaded.llmModel, "gpt-4o-mini", "llmModel persists through PersistenceService save/load")
+
+            // Overwrite with empty to verify "use bundle default" state persists
+            s.llmModel = ""
+            try? await persistence.saveSettings(s)
+            let loaded2 = await persistence.loadSettings()
+            t.checkEqual(loaded2.llmModel, "", "empty llmModel persists (means use bundle default)")
+        } else {
+            t.check(false, "llmModel persistence: failed to create PersistenceService")
+        }
+    }
+
     // --- Report ---
     t.report()
     if !t.failedTests.isEmpty {
