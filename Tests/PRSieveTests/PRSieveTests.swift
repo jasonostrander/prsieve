@@ -198,26 +198,19 @@ func runAllTests() async {
         t.checkEqual(await llm4.getCallCount(), 1, "other author's PR hits LLM normally")
     }
 
-    // --- Pre-filter: Targets main/master branch ---
+    // --- PRs targeting main/master fall through to LLM ---
 
     do {
-        for branch in ["main", "master", "Main", "MASTER"] {
+        // With master filter removed, main/master PRs go to the LLM like any other PR.
+        // The LLM prompt instructs it to prioritize PRs fixing main/master failures.
+        for branch in ["main", "master", "develop"] {
             let pr = makePR(baseBranch: branch)
             let llm = MockLLMClient()
+            await llm.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
             let svc = CategorizationService(llmClient: llm)
-            let result = await svc.categorize(pr: pr, codeowners: nil, userContext: "")
-            t.checkEqual(result.category, .priority, "base branch \(branch) → priority")
-            t.check(result.reason.contains(branch) || result.reason.lowercased().contains("master") || result.reason.lowercased().contains("main"), "base branch reason mentions branch")
-            t.checkEqual(await llm.getCallCount(), 0, "base branch \(branch) skips LLM")
+            _ = await svc.categorize(pr: pr, codeowners: nil, userContext: "")
+            t.checkEqual(await llm.getCallCount(), 1, "base branch \(branch) hits LLM")
         }
-
-        // Feature branch → falls through to LLM
-        let pr = makePR(isDirectCodeowner: true, baseBranch: "develop")
-        let llm = MockLLMClient()
-        await llm.setResponse(#"{"category": "low", "reason": "Not relevant"}"#)
-        let svc = CategorizationService(llmClient: llm)
-        _ = await svc.categorize(pr: pr, codeowners: nil, userContext: "")
-        t.checkEqual(await llm.getCallCount(), 1, "non-main base branch hits LLM")
     }
 
     // --- Pre-filter: @Mentioned ---
