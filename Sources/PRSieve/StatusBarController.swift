@@ -38,7 +38,7 @@ final class StatusBarController: NSObject {
     private func updateIcon() {
         let (hasPriority, hasLLMError) = withObservationTracking {
             (
-                viewModel.priority.contains { $0.buildStatus == .passed },
+                viewModel.review.contains { $0.buildStatus == .passed },
                 viewModel.llmError != nil
             )
         } onChange: { [weak self] in

@@ -158,7 +158,7 @@ struct SettingsView: View {
 
             Section("Display") {
                 Toggle("Hide draft PRs", isOn: $viewModel.settings.hideDraftPRs)
-                Toggle("Keep unreviewed priority PRs visible for 3 days after merge", isOn: $viewModel.settings.keepUnreviewedPriorityAfterMerge)
+                Toggle("Keep unreviewed Review PRs visible for 3 days after merge", isOn: $viewModel.settings.keepUnreviewedPriorityAfterMerge)
             }
 
             Section("Startup") {
@@ -166,7 +166,7 @@ struct SettingsView: View {
             }
 
             Section("Notifications") {
-                Toggle("Notify when priority PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
+                Toggle("Notify when Review PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
             }
 
             Section {

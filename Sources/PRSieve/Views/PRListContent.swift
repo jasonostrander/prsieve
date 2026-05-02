@@ -7,14 +7,14 @@ struct PRListContent: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: compact ? 12 : 20) {
-                if !viewModel.priority.isEmpty {
-                    categorySection(.priority, prs: viewModel.priority)
+                if !viewModel.review.isEmpty {
+                    categorySection(.priority, prs: viewModel.review)
                 }
-                if !viewModel.low.isEmpty {
-                    categorySection(.low, prs: viewModel.low)
+                if !viewModel.watch.isEmpty {
+                    categorySection(.low, prs: viewModel.watch)
                 }
-                if !viewModel.noise.isEmpty {
-                    categorySection(.noise, prs: viewModel.noise)
+                if !viewModel.skip.isEmpty {
+                    categorySection(.noise, prs: viewModel.skip)
                 }
 
                 if !viewModel.reviewed.isEmpty {

@@ -7,9 +7,9 @@ enum PRCategory: String, Codable, CaseIterable, Comparable, Sendable {
 
     var displayName: String {
         switch self {
-        case .priority: "Priority"
-        case .low: "Low"
-        case .noise: "Noise"
+        case .priority: "Review"
+        case .low: "Watch"
+        case .noise: "Skip"
         }
     }
 

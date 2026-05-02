@@ -26,9 +26,9 @@ final class DashboardViewModel {
     private var pollingTask: Task<Void, Never>?
     private var summaryTasks: [PRCategory: Task<Void, Never>] = [:]
 
-    var priority: [PullRequest] { filtered(.priority).filter { !isReviewedByMe($0) } }
-    var low: [PullRequest] { filtered(.low).filter { !isReviewedByMe($0) } }
-    var noise: [PullRequest] { filtered(.noise).filter { !isReviewedByMe($0) } }
+    var review: [PullRequest] { filtered(.priority).filter { !isReviewedByMe($0) } }
+    var watch: [PullRequest] { filtered(.low).filter { !isReviewedByMe($0) } }
+    var skip: [PullRequest] { filtered(.noise).filter { !isReviewedByMe($0) } }
     var reviewed: [PullRequest] {
         pullRequests
             .filter { isReviewedByMe($0) }
@@ -39,7 +39,7 @@ final class DashboardViewModel {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    var totalCount: Int { priority.count + low.count + noise.count + reviewed.count }
+    var totalCount: Int { review.count + watch.count + skip.count + reviewed.count }
 
     var llmErrorDescription: (title: String, suggestion: String)? {
         switch llmError {
