@@ -65,6 +65,9 @@ actor CategorizationService {
         // Everything else → LLM
         do {
             return try await llmCategorize(pr: pr, codeowners: codeowners, userContext: userContext)
+        } catch LLMError.notConfigured {
+            // LLM intentionally disabled — no error to surface
+            return CategorizationResult(category: .low, reason: "LLM not configured")
         } catch let err as LLMError {
             lastLLMError = err
             return CategorizationResult(

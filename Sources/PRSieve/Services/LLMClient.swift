@@ -53,7 +53,7 @@ actor LLMClient: LLMProvider {
     }
 
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
-        guard !endpoint.isEmpty else {
+        guard !endpoint.isEmpty, apiKey != "sk-..." else {
             throw LLMError.notConfigured
         }
 

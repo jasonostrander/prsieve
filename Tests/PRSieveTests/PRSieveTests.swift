@@ -52,7 +52,7 @@ actor MockLLMClient: LLMProvider {
 
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
         callCount += 1
-        if shouldThrow { throw LLMError.notConfigured }
+        if shouldThrow { throw LLMError.requestFailed("mock error") }
         return response
     }
 }
