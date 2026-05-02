@@ -44,15 +44,17 @@ final class TestRunner {
 actor MockLLMClient: LLMProvider {
     var response = #"{"category": "low", "reason": "Not in user's domain"}"#
     var shouldThrow = false
+    var throwError: LLMError = .requestFailed("mock error")
     var callCount = 0
 
     func setResponse(_ response: String) { self.response = response }
     func setShouldThrow(_ value: Bool) { shouldThrow = value }
+    func setThrowError(_ error: LLMError) { throwError = error }
     func getCallCount() -> Int { callCount }
 
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
         callCount += 1
-        if shouldThrow { throw LLMError.requestFailed("mock error") }
+        if shouldThrow { throw throwError }
         return response
     }
 }
@@ -1147,6 +1149,57 @@ func runAllTests() async {
         t.checkEqual(pr.id, "owner/repo#1", "PR id format")
         t.checkEqual(pr.repoShortName, "repo", "repo short name")
         t.checkEqual(pr.ageDescription, "1h", "age description")
+    }
+
+    // --- LLMClient: placeholder API key is treated as not configured ---
+
+    do {
+        // "sk-..." placeholder → notConfigured without making a network call
+        let placeholder = LLMClient(endpoint: "https://api.openai.com/v1", apiKey: "sk-...", model: "gpt-4o-mini")
+        do {
+            _ = try await placeholder.complete(systemPrompt: "x", userPrompt: "y")
+            t.check(false, "placeholder apiKey should throw")
+        } catch LLMError.notConfigured {
+            t.check(true, "placeholder apiKey throws notConfigured")
+        } catch {
+            t.check(false, "placeholder apiKey threw wrong error: \(error)")
+        }
+
+        // Non-placeholder key with valid endpoint passes the guard (may fail for other reasons)
+        let realKey = LLMClient(endpoint: "http://127.0.0.1:1", apiKey: "sk-real-key-abc", model: "gpt-4o-mini")
+        do {
+            _ = try await realKey.complete(systemPrompt: "x", userPrompt: "y")
+            t.check(false, "127.0.0.1:1 should fail to connect")
+        } catch LLMError.notConfigured {
+            t.check(false, "non-placeholder key must NOT throw notConfigured")
+        } catch {
+            t.check(true, "non-placeholder key passes guard; got expected network error")
+        }
+    }
+
+    // --- CategorizationService: notConfigured is silent (LLM disabled, not broken) ---
+
+    do {
+        // notConfigured → no lastLLMError set, PR falls back to .low silently
+        let llm = MockLLMClient()
+        await llm.setShouldThrow(true)
+        await llm.setThrowError(.notConfigured)
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isRequestedReviewer: true, isDirectCodeowner: false)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result.category, .low, "notConfigured → fallback to low")
+        let err = await service.consumeLastLLMError()
+        t.check(err == nil, "notConfigured is NOT captured as an error (LLM disabled)")
+
+        // requestFailed IS captured (LLM broken, not just disabled)
+        let llm2 = MockLLMClient()
+        await llm2.setShouldThrow(true)
+        await llm2.setThrowError(.requestFailed("401 Unauthorized"))
+        let service2 = CategorizationService(llmClient: llm2)
+        let result2 = await service2.categorize(pr: pr, codeowners: nil, userContext: "")
+        t.checkEqual(result2.category, .low, "requestFailed → fallback to low")
+        let err2 = await service2.consumeLastLLMError()
+        t.check(err2 != nil, "requestFailed IS captured as an error")
     }
 
     // --- CategorizationService: LLM error tracking ---
