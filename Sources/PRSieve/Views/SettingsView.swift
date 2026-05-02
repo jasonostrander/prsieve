@@ -89,8 +89,36 @@ struct SettingsView: View {
     private var promptTab: some View {
         Form {
             Section {
-                TextField("Model name", text: $viewModel.settings.llmModel)
-                    .font(.body.monospaced())
+                HStack {
+                    TextField("Model name", text: $viewModel.settings.llmModel)
+                        .font(.body.monospaced())
+                        .onChange(of: viewModel.settings.llmModel) { _, _ in
+                            viewModel.llmTestResult = nil
+                        }
+                    Button {
+                        Task { await viewModel.testLLMConfig() }
+                    } label: {
+                        if viewModel.isTestingLLM {
+                            ProgressView().scaleEffect(0.6).frame(width: 32)
+                        } else {
+                            Text("Test")
+                        }
+                    }
+                    .disabled(viewModel.isTestingLLM || viewModel.settings.llmModel.isEmpty)
+                    .frame(width: 44)
+                }
+                if let result = viewModel.llmTestResult {
+                    switch result {
+                    case .success:
+                        Label("Connection successful", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    case .failure(let msg):
+                        Label(msg, systemImage: "exclamationmark.circle.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
             } header: {
                 Text("Model")
             } footer: {
