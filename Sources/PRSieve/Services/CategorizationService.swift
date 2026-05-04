@@ -40,14 +40,15 @@ actor CategorizationService {
             return CategorizationResult(category: .noise, reason: "Strings/translations PR")
         }
 
-        // Noise: user's own PR, unless others have commented or requested changes
+        // Own PRs: never priority — show as low if changes requested, noise otherwise
         if !username.isEmpty && pr.author.caseInsensitiveCompare(username) == .orderedSame {
             let othersRequestedChanges = pr.reviewers.contains {
                 $0.login.caseInsensitiveCompare(username) != .orderedSame && $0.state == .changesRequested
             }
-            if !othersRequestedChanges && pr.humanCommentCount == 0 {
-                return CategorizationResult(category: .noise, reason: "Your own PR")
+            if othersRequestedChanges {
+                return CategorizationResult(category: .low, reason: "Your own PR — changes requested")
             }
+            return CategorizationResult(category: .noise, reason: "Your own PR")
         }
 
         // Pre-filter: mentioned in comments → always priority
