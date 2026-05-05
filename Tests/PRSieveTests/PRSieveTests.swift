@@ -164,7 +164,7 @@ func runAllTests() async {
     // --- Pre-filter: Own PR ---
 
     do {
-        let username = "jasonostrander"
+        let username = "testuser"
 
         // Own PR, no comments → noise
         let ownPR = makePR(author: username)
@@ -228,7 +228,7 @@ func runAllTests() async {
     // --- Pre-filter: Previously Reviewed ---
 
     do {
-        let username = "jasonostrander"
+        let username = "testuser"
 
         // Previously approved → priority, skips LLM
         var prApproved = makePR()
@@ -342,7 +342,7 @@ func runAllTests() async {
     t.check(GitHubClient.isBot("renovate"), "bot: renovate")
     t.check(GitHubClient.isBot("codecov"), "bot: codecov")
     t.check(GitHubClient.isBot("github-actions"), "bot: github-actions")
-    t.check(!GitHubClient.isBot("jasonostrander"), "human: jasonostrander")
+    t.check(!GitHubClient.isBot("testuser"), "human: testuser")
     t.check(!GitHubClient.isBot("alice"), "human: alice")
     t.check(!GitHubClient.isBot("bob-smith"), "human: bob-smith")
 
@@ -633,33 +633,33 @@ func runAllTests() async {
 
     do {
         let content = """
-            * @fallback-team @jasonostrander
-            /src/cart/ @jasonostrander
+            * @fallback-team @testuser
+            /src/cart/ @testuser
             /src/auth/ @alice
             """
         let parser = CodeownersParser(content: content)
 
         // User owns src/cart/ directly
         t.check(
-            parser.isDirectOwner(username: "jasonostrander", files: ["src/cart/Cart.swift"]),
+            parser.isDirectOwner(username: "testuser", files: ["src/cart/Cart.swift"]),
             "direct owner of cart file"
         )
 
         // User is in catch-all but NOT direct owner of auth files
         t.check(
-            !parser.isDirectOwner(username: "jasonostrander", files: ["src/auth/Login.swift"]),
+            !parser.isDirectOwner(username: "testuser", files: ["src/auth/Login.swift"]),
             "not direct owner of auth file (only catch-all)"
         )
 
         // Mixed: one file is direct, one is catch-all → still direct owner
         t.check(
-            parser.isDirectOwner(username: "jasonostrander", files: ["src/auth/Login.swift", "src/cart/Cart.swift"]),
+            parser.isDirectOwner(username: "testuser", files: ["src/auth/Login.swift", "src/cart/Cart.swift"]),
             "direct owner when at least one file matches"
         )
 
         // Files only matching catch-all
         t.check(
-            !parser.isDirectOwner(username: "jasonostrander", files: ["README.md", "docs/setup.md"]),
+            !parser.isDirectOwner(username: "testuser", files: ["README.md", "docs/setup.md"]),
             "not direct owner when all files are catch-all"
         )
 
@@ -673,10 +673,10 @@ func runAllTests() async {
     // --- CodeownersParser: Case-insensitive owner matching ---
 
     do {
-        let content = "/src/ @JasonOstrander"
+        let content = "/src/ @TestUser"
         let parser = CodeownersParser(content: content)
         t.check(
-            parser.isDirectOwner(username: "jasonostrander", files: ["src/file.swift"]),
+            parser.isDirectOwner(username: "testuser", files: ["src/file.swift"]),
             "case-insensitive owner match"
         )
     }
@@ -797,29 +797,29 @@ func runAllTests() async {
         var pr7 = makePR()
         pr7.category = .priority
         pr7.buildStatus = .passed
-        pr7.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
-        t.checkEqual(shouldNotify([pr7], username: "jasonostrander").count, 0, "no notify: already approved")
+        pr7.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved)]
+        t.checkEqual(shouldNotify([pr7], username: "testuser").count, 0, "no notify: already approved")
 
         // Already reviewed (changes requested) → no notify
         var pr8 = makePR()
         pr8.category = .priority
         pr8.buildStatus = .passed
-        pr8.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .changesRequested)]
-        t.checkEqual(shouldNotify([pr8], username: "jasonostrander").count, 0, "no notify: changes requested")
+        pr8.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .changesRequested)]
+        t.checkEqual(shouldNotify([pr8], username: "testuser").count, 0, "no notify: changes requested")
 
         // Pending review → still notify
         var pr9 = makePR()
         pr9.category = .priority
         pr9.buildStatus = .passed
-        pr9.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .pending)]
-        t.checkEqual(shouldNotify([pr9], username: "jasonostrander").count, 1, "notify: only pending review")
+        pr9.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .pending)]
+        t.checkEqual(shouldNotify([pr9], username: "testuser").count, 1, "notify: only pending review")
 
         // Review dismissed → still notify (needs re-review)
         var pr10 = makePR()
         pr10.category = .priority
         pr10.buildStatus = .passed
-        pr10.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .dismissed)]
-        t.checkEqual(shouldNotify([pr10], username: "jasonostrander").count, 0, "no notify: dismissed counts as reviewed")
+        pr10.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .dismissed)]
+        t.checkEqual(shouldNotify([pr10], username: "testuser").count, 0, "no notify: dismissed counts as reviewed")
     }
 
     // --- Notified PR IDs persistence ---
@@ -861,30 +861,30 @@ func runAllTests() async {
 
         // PR with user's approval → reviewed
         var pr1 = makePR()
-        pr1.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
-        t.check(isReviewedByMe(pr1, username: "jasonostrander"), "user approved → reviewed")
+        pr1.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved)]
+        t.check(isReviewedByMe(pr1, username: "testuser"), "user approved → reviewed")
 
         // Case-insensitive match
-        t.check(isReviewedByMe(pr1, username: "JasonOstrander"), "case-insensitive → reviewed")
+        t.check(isReviewedByMe(pr1, username: "TestUser"), "case-insensitive → reviewed")
 
         // PR with user's changes_requested → not reviewed
         var pr2 = makePR()
-        pr2.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .changesRequested)]
-        t.check(!isReviewedByMe(pr2, username: "jasonostrander"), "changes requested → not reviewed")
+        pr2.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .changesRequested)]
+        t.check(!isReviewedByMe(pr2, username: "testuser"), "changes requested → not reviewed")
 
         // PR with user's comment only → not reviewed
         var pr3 = makePR()
-        pr3.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .commented)]
-        t.check(!isReviewedByMe(pr3, username: "jasonostrander"), "commented → not reviewed")
+        pr3.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .commented)]
+        t.check(!isReviewedByMe(pr3, username: "testuser"), "commented → not reviewed")
 
         // PR with someone else's approval → not reviewed
         var pr4 = makePR()
         pr4.reviewers = [ReviewerInfo(login: "alice", avatarURL: nil, state: .approved)]
-        t.check(!isReviewedByMe(pr4, username: "jasonostrander"), "other user approved → not reviewed")
+        t.check(!isReviewedByMe(pr4, username: "testuser"), "other user approved → not reviewed")
 
         // PR with no reviewers → not reviewed
         let pr5 = makePR()
-        t.check(!isReviewedByMe(pr5, username: "jasonostrander"), "no reviewers → not reviewed")
+        t.check(!isReviewedByMe(pr5, username: "testuser"), "no reviewers → not reviewed")
 
         // Empty username → not reviewed
         t.check(!isReviewedByMe(pr1, username: ""), "empty username → not reviewed")
@@ -893,9 +893,9 @@ func runAllTests() async {
         var pr6 = makePR()
         pr6.reviewers = [
             ReviewerInfo(login: "alice", avatarURL: nil, state: .changesRequested),
-            ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved),
+            ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved),
         ]
-        t.check(isReviewedByMe(pr6, username: "jasonostrander"), "user approved among others → reviewed")
+        t.check(isReviewedByMe(pr6, username: "testuser"), "user approved among others → reviewed")
     }
 
     // --- Closed PR filtering ---
@@ -930,27 +930,27 @@ func runAllTests() async {
         // Closed reviewed PR is also excluded
         var closedReviewed = makePR()
         closedReviewed.isClosed = true
-        closedReviewed.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
-        t.checkEqual(visibleReviewed([closedReviewed], username: "jasonostrander").count, 0,
+        closedReviewed.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved)]
+        t.checkEqual(visibleReviewed([closedReviewed], username: "testuser").count, 0,
                      "closed reviewed PR excluded from reviewed section")
 
         // Open reviewed PR appears
         var openReviewed = makePR()
         openReviewed.isClosed = false
-        openReviewed.reviewers = [ReviewerInfo(login: "jasonostrander", avatarURL: nil, state: .approved)]
-        t.checkEqual(visibleReviewed([openReviewed], username: "jasonostrander").count, 1,
+        openReviewed.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved)]
+        t.checkEqual(visibleReviewed([openReviewed], username: "testuser").count, 1,
                      "open reviewed PR appears in reviewed section")
     }
 
     // --- Keep unreviewed priority PRs after merge ---
 
     do {
-        let username = "jasonostrander"
+        let username = "testuser"
 
         func isUnreviewedPriorityWithinGracePeriod(
             _ pr: PullRequest,
             enabled: Bool = true,
-            username: String = "jasonostrander"
+            username: String = "testuser"
         ) -> Bool {
             guard enabled, pr.isMerged, pr.category == .priority else { return false }
             let isReviewed = pr.reviewers.contains { $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state == .approved }
@@ -999,7 +999,7 @@ func runAllTests() async {
     // --- Previously reviewed PRs (reviewed-by fetch) ---
 
     do {
-        let username = "jasonostrander"
+        let username = "testuser"
 
         // PR found via reviewed-by has isRequestedReviewer = false
         var pr = makePR(isRequestedReviewer: false)
