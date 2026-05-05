@@ -487,7 +487,7 @@ func runAllTests() async {
     }
 
     do {
-        let json = #"{"endpoint":"https://api.openai.com/v1","apiKey":"sk-abc","model":"gpt-4o-mini"}"#
+        let json = #"{"endpoint":"https://api.openai.com/v1","token":"sk-abc","model":"gpt-4o-mini"}"#
         let decoded = try! JSONDecoder().decode(LLMConfig.self, from: json.data(using: .utf8)!)
         t.checkEqual(decoded.endpoint, "https://api.openai.com/v1", "config endpoint decoded")
         t.checkEqual(decoded.apiKey, "sk-abc", "config apiKey decoded")

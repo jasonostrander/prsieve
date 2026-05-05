@@ -11,7 +11,7 @@ macOS menu bar app for triaging GitHub PR review requests. Uses an LLM to catego
 
 ## Build & Run
 
-First-time setup: copy `llm_config.example.json` to `llm_config.json` and fill in the endpoint/apiKey/model. The file is gitignored. `run.sh`/`release.sh` will warn and fall back to the example if it's missing (LLM will be disabled until apiKey is set).
+First-time setup: copy `llm_config.example.json` to `llm_config.json` and fill in the endpoint/token/model. The file is gitignored. `run.sh`/`release.sh` will warn and fall back to the example if it's missing (LLM will be disabled until token is set).
 
 ```bash
 cp llm_config.example.json llm_config.json   # one-time, then edit
@@ -21,7 +21,9 @@ swift build       # build only
 ./release.sh      # builds release .app and packages dist/PRSieve.dmg
 ```
 
-The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns + llm_config.json into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running.
+The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns + a binary-plist `llm_config.plist` derived from `llm_config.json` into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running.
+
+`release.sh` produces a Developer ID-signed and notarized DMG (signed by `Developer ID Application: Jason Ostrander (TCL5ZG7A2L)`, notarized via the `PRSieve-notarize` keychain profile, ticket stapled). The bundled config is converted to **binary plist** at build time so corporate DLP (CrowdStrike) doesn't strip it from the DMG — plain JSON files get filtered.
 
 To regenerate the app icon: `swift resources/generate_icon.swift`
 
@@ -39,7 +41,7 @@ Sources/PRSieve/
   Services/
     GitHubClient.swift          # GitHub REST API (search, PR details, reviews, CODEOWNERS, combined CI status)
     LLMClient.swift             # OpenAI-compatible chat completions, LLMProvider protocol
-    LLMConfig.swift             # Loads endpoint/apiKey/model from bundled llm_config.json
+    LLMConfig.swift             # Loads endpoint/token/model from bundled llm_config.plist
     LLMSystemPrompt.swift       # LLM system prompt (edit to tune categorization behavior)
     CategorizationService.swift # Pre-filters + LLM triage
     CodeownersParser.swift      # Gitignore-style CODEOWNERS pattern matching
@@ -64,8 +66,8 @@ Sources/PRSieve/
 - **Menu bar app**: Runs as `LSUIElement` (no Dock icon). Left-click shows PR popover, right-click shows context menu (Refresh, Settings, Quit). Status bar icon turns orange when priority PRs with passing CI exist.
 - **No Xcode**: Built entirely with SPM. `run.sh` creates a minimal .app bundle.
 - **No Keychain**: Tokens stored in `~/.../PRSieve/.tokens.json` with 0600 permissions (unsigned app causes Keychain prompts).
-- **LLM credentials baked into the bundle**: Endpoint, API key, and model live in `llm_config.json` at the project root (gitignored). `run.sh`/`release.sh` copy it into `Contents/Resources/llm_config.json` and `LLMConfig.loadFromBundle()` reads it via `Bundle.main`. Use `llm_config.example.json` as the template. Users only configure the prompt (ownership context) via Settings.
-- **Ad-hoc code signing**: `run.sh` runs `codesign --force --sign -` on the bundle so macOS grants notification permissions.
+- **LLM credentials baked into the bundle**: Endpoint, token, and model live in `llm_config.json` at the project root (gitignored). `run.sh`/`release.sh` convert it to a **binary plist** (`Contents/Resources/llm_config.plist`) and `LLMConfig.loadFromBundle()` reads it via `Bundle.main`. Use `llm_config.example.json` as the template. Users only configure the prompt (ownership context) via Settings. JSON-key is `token` (not `apiKey`) so corporate DLP doesn't recognize the file as credentials; binary plist further hides it from text-based scanners.
+- **Code signing**: `run.sh` ad-hoc signs (`--sign -`) for local dev. `release.sh` signs with Developer ID + hardened runtime + secure timestamp, then submits to Apple's notary service via `notarytool` (using the `PRSieve-notarize` keychain profile) and staples the ticket. The signing identity SHA-1 hash is hardcoded in `release.sh` to disambiguate when multiple Developer ID certs are installed.
 - **Pre-filters before LLM**: Applied in order before any LLM call:
   1. Draft PRs → noise
   2. Release PRs → noise
@@ -127,4 +129,4 @@ All in `~/Library/Application Support/PRSieve/`:
 - `notified_pr_ids.json` — persisted set of already-notified PR IDs
 - `codeowners_cache/` — per-repo CODEOWNERS files
 
-LLM credentials are *not* stored here — they come from the bundled `llm_config.json` (see "LLM credentials baked into the bundle" above).
+LLM credentials are *not* stored here — they come from the bundled `llm_config.plist` (see "LLM credentials baked into the bundle" above).

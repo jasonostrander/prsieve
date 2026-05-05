@@ -1,5 +1,5 @@
 {
   "endpoint": "https://api.openai.com/v1",
-  "apiKey": "sk-...",
+  "token": "sk-...",
   "model": "gpt-4o-mini"
 }
