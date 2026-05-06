@@ -20,11 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let appState = AppState()
     private var statusBarController: StatusBarController?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusBarController = StatusBarController(viewModel: viewModel)
         statusBarController?.onOpenSettings = { [weak self] in
             self?.openSettings()
+        }
+        statusBarController?.onOpenOnboarding = { [weak self] in
+            self?.openOnboarding()
         }
 
         Task {
@@ -58,9 +62,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.settingsWindow = window
     }
 
+    func openOnboarding() {
+        if let window = onboardingWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        guard let persistence = viewModel.persistence else { return }
+
+        let onboardingVM = OnboardingViewModel(persistence: persistence)
+        let view = OnboardingView(viewModel: onboardingVM, onFinish: { [weak self] in
+            self?.onboardingWindow?.close()
+        })
+
+        let hostingController = NSHostingController(rootView: view)
+        hostingController.sizingOptions = .preferredContentSize
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Welcome to PRSieve"
+        window.styleMask = [.titled, .closable]
+        window.center()
+        window.delegate = self
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        self.onboardingWindow = window
+    }
+
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
-        settingsWindow = nil
+        guard let window = notification.object as? NSWindow else { return }
+        if window === settingsWindow {
+            settingsWindow = nil
+        } else if window === onboardingWindow {
+            onboardingWindow = nil
+        } else {
+            return
+        }
         Task {
             await appState.reinitialize(viewModel: viewModel)
         }
@@ -110,6 +147,11 @@ final class AppState {
         // Sync launch-at-login registration with the saved setting
         LaunchAtLoginService.setEnabled(settings.launchAtLogin)
         let githubToken = await persistence.loadToken(forKey: "github_token") ?? ""
+
+        viewModel.needsOnboarding = settings.githubUsername.isEmpty
+            || githubToken.isEmpty
+            || settings.repos.isEmpty
+            || settings.codeownerContext.isEmpty
         let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmConfig = LLMConfig.loadFromBundle()
 

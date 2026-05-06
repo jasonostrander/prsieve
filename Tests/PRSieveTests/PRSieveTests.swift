@@ -1339,6 +1339,98 @@ func runAllTests() async {
         }
     }
 
+    // --- OnboardingViewModel ---
+
+    do {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-onboarding-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        guard let persistence = try? PersistenceService(directory: dir) else {
+            t.check(false, "onboarding: failed to create PersistenceService")
+            t.report()
+            if !t.failedTests.isEmpty { _Exit(1) }
+            return
+        }
+
+        // Empty initial state — cannot advance from GitHub or Prompt steps
+        let vm = OnboardingViewModel(persistence: persistence)
+        await vm.load()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.welcome, "starts on welcome step")
+        t.check(!vm.canAdvanceFromGitHub, "blank GitHub fields cannot advance")
+        t.check(!vm.canAdvanceFromPrompt, "blank prompt cannot advance")
+
+        // Advancing through steps from welcome works regardless of fields
+        await vm.advance()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.github, "welcome → github")
+        vm.goBack()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.welcome, "github → welcome via back")
+
+        // Filling username only is not enough
+        vm.githubUsername = "alice"
+        t.check(!vm.canAdvanceFromGitHub, "username alone is insufficient")
+
+        vm.githubToken = "ghp_xxx"
+        t.check(!vm.canAdvanceFromGitHub, "username + token without repos is insufficient")
+
+        // Whitespace-only fields don't satisfy the gate
+        vm.githubUsername = "   "
+        vm.githubToken = "ghp_xxx"
+        vm.repos = [RepoConfig(repo: "owner/repo")]
+        t.check(!vm.canAdvanceFromGitHub, "whitespace-only username does not satisfy gate")
+        vm.githubUsername = "alice"
+        t.check(vm.canAdvanceFromGitHub, "all GitHub fields filled → can advance")
+
+        // addRepo rejects malformed and duplicates
+        vm.newRepoText = "no-slash"
+        vm.addRepo()
+        t.checkEqual(vm.repos.count, 1, "missing slash rejected")
+        vm.newRepoText = "owner/repo"
+        vm.addRepo()
+        t.checkEqual(vm.repos.count, 1, "duplicate repo rejected")
+        vm.newRepoText = "  owner/other  "
+        vm.addRepo()
+        t.checkEqual(vm.repos.count, 2, "trimmed repo added")
+        t.checkEqual(vm.repos.last?.repo, "owner/other", "trimmed repo stored without whitespace")
+        t.checkEqual(vm.newRepoText, "", "newRepoText cleared after add")
+
+        vm.removeRepo(at: IndexSet(integer: 1))
+        t.checkEqual(vm.repos.count, 1, "removeRepo removes by offset")
+
+        // Prompt gate
+        t.check(!vm.canAdvanceFromPrompt, "blank prompt blocks advance")
+        vm.codeownerContext = "  \n  "
+        t.check(!vm.canAdvanceFromPrompt, "whitespace-only prompt blocks advance")
+        vm.codeownerContext = "I own the iOS checkout flow"
+        t.check(vm.canAdvanceFromPrompt, "non-empty prompt allows advance")
+
+        // Advancing persists settings + token
+        vm.step = .github
+        await vm.advance()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.prompt, "github → prompt")
+        let saved1 = await persistence.loadSettings()
+        t.checkEqual(saved1.githubUsername, "alice", "advance persists username")
+        t.checkEqual(saved1.repos.count, 1, "advance persists repos")
+        t.checkEqual(await persistence.loadToken(forKey: "github_token"), "ghp_xxx", "advance persists token")
+
+        await vm.advance()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.done, "prompt → done")
+        let saved2 = await persistence.loadSettings()
+        t.checkEqual(saved2.codeownerContext, "I own the iOS checkout flow", "advance persists prompt")
+
+        // finish() persists final state and step does not move past done
+        await vm.finish()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.done, "finish leaves step on done")
+
+        // load() restores existing settings on a fresh view model
+        let vm2 = OnboardingViewModel(persistence: persistence)
+        await vm2.load()
+        t.checkEqual(vm2.githubUsername, "alice", "load restores username")
+        t.checkEqual(vm2.githubToken, "ghp_xxx", "load restores token")
+        t.checkEqual(vm2.repos.count, 1, "load restores repos")
+        t.checkEqual(vm2.codeownerContext, "I own the iOS checkout flow", "load restores prompt")
+    }
+
     // --- Report ---
     t.report()
     if !t.failedTests.isEmpty {

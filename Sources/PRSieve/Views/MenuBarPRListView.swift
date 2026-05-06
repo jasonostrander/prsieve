@@ -3,11 +3,62 @@ import SwiftUI
 struct MenuBarPRListView: View {
     @Bindable var viewModel: DashboardViewModel
     var onOpenSettings: (() -> Void)?
+    var onOpenOnboarding: (() -> Void)?
 
     @State private var showSearch = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
+        if viewModel.needsOnboarding {
+            setupView
+        } else {
+            mainView
+        }
+    }
+
+    private var setupView: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.tint)
+
+            Text("Welcome to PRSieve")
+                .font(.title2.weight(.semibold))
+
+            Text("Connect your GitHub account to start triaging review requests.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 24)
+
+            Button {
+                onOpenOnboarding?()
+            } label: {
+                Text("Set Up")
+                    .frame(minWidth: 100)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            Spacer()
+            HStack {
+                Spacer()
+                Button("Quit") {
+                    NSApp.terminate(nil)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+        .frame(width: 420, height: 580)
+        .focusEffectDisabled()
+    }
+
+    private var mainView: some View {
         VStack(spacing: 0) {
             // Header
             HStack {

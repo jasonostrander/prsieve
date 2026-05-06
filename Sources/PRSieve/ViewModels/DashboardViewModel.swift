@@ -14,6 +14,7 @@ final class DashboardViewModel {
     var hideDrafts = true
     var githubUsername = ""
     var keepUnreviewedPriorityAfterMerge = true
+    var needsOnboarding = false
 
     var collapsedSections: Set<PRCategory> = []
     var collapsedReviewed = true

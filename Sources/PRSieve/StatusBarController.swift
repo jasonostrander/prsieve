@@ -9,6 +9,7 @@ final class StatusBarController: NSObject {
     private let viewModel: DashboardViewModel
 
     var onOpenSettings: (() -> Void)?
+    var onOpenOnboarding: (() -> Void)?
 
     init(viewModel: DashboardViewModel) {
         self.viewModel = viewModel
@@ -20,10 +21,17 @@ final class StatusBarController: NSObject {
 
         super.init()
 
-        let content = MenuBarPRListView(viewModel: viewModel, onOpenSettings: { [weak self] in
-            self?.popover.performClose(nil)
-            self?.onOpenSettings?()
-        })
+        let content = MenuBarPRListView(
+            viewModel: viewModel,
+            onOpenSettings: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.onOpenSettings?()
+            },
+            onOpenOnboarding: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.onOpenOnboarding?()
+            }
+        )
         popover.contentViewController = NSHostingController(rootView: content)
 
         if let button = statusItem.button {
@@ -83,6 +91,10 @@ final class StatusBarController: NSObject {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let onboardingItem = NSMenuItem(title: "Show Onboarding...", action: #selector(onboardingAction), keyEquivalent: "")
+        onboardingItem.target = self
+        menu.addItem(onboardingItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit PRSieve", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
@@ -100,6 +112,10 @@ final class StatusBarController: NSObject {
 
     @objc private func settingsAction() {
         onOpenSettings?()
+    }
+
+    @objc private func onboardingAction() {
+        onOpenOnboarding?()
     }
 
     private func togglePopover(_ sender: NSStatusBarButton) {
