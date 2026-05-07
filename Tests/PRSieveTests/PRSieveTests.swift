@@ -1414,13 +1414,34 @@ func runAllTests() async {
         t.checkEqual(await persistence.loadToken(forKey: "github_token"), "ghp_xxx", "advance persists token")
 
         await vm.advance()
-        t.checkEqual(vm.step, OnboardingViewModel.Step.done, "prompt → done")
+        t.checkEqual(vm.step, OnboardingViewModel.Step.notifications, "prompt → notifications")
         let saved2 = await persistence.loadSettings()
         t.checkEqual(saved2.codeownerContext, "I own the iOS checkout flow", "advance persists prompt")
 
+        // notifications step persists notificationsEnabled + launchAtLogin
+        vm.notificationsEnabled = false
+        // Don't call setLaunchAtLogin() here — it would attempt SMAppService
+        // registration, which fails outside a real .app bundle. The persist
+        // path only reads the stored property.
+        vm.launchAtLogin = true
+        await vm.advance()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.done, "notifications → done")
+        let saved3 = await persistence.loadSettings()
+        t.checkEqual(saved3.notificationsEnabled, false, "advance persists notificationsEnabled=false")
+        t.checkEqual(saved3.launchAtLogin, true, "advance persists launchAtLogin=true")
+
         // finish() persists final state and step does not move past done
+        vm.notificationsEnabled = true
         await vm.finish()
         t.checkEqual(vm.step, OnboardingViewModel.Step.done, "finish leaves step on done")
+        let saved4 = await persistence.loadSettings()
+        t.checkEqual(saved4.notificationsEnabled, true, "finish persists notificationsEnabled=true")
+
+        // goBack from done lands on notifications, not prompt
+        vm.goBack()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.notifications, "back from done → notifications")
+        vm.goBack()
+        t.checkEqual(vm.step, OnboardingViewModel.Step.prompt, "back from notifications → prompt")
 
         // load() restores existing settings on a fresh view model
         let vm2 = OnboardingViewModel(persistence: persistence)
@@ -1429,6 +1450,8 @@ func runAllTests() async {
         t.checkEqual(vm2.githubToken, "ghp_xxx", "load restores token")
         t.checkEqual(vm2.repos.count, 1, "load restores repos")
         t.checkEqual(vm2.codeownerContext, "I own the iOS checkout flow", "load restores prompt")
+        t.checkEqual(vm2.notificationsEnabled, true, "load restores notificationsEnabled")
+        t.checkEqual(vm2.launchAtLogin, true, "load restores launchAtLogin")
     }
 
     // --- Report ---

@@ -14,6 +14,8 @@ final class SettingsViewModel {
     var saveError: String?
     var llmTestResult: LLMTestResult?
     var isTestingLLM = false
+    var notificationAuthState: NotificationAuthState = .notDetermined
+    var isRequestingNotifications = false
 
     private let persistence: PersistenceService
 
@@ -27,6 +29,21 @@ final class SettingsViewModel {
         if settings.llmModel.isEmpty {
             settings.llmModel = LLMConfig.loadFromBundle().model
         }
+        // Auth state is fetched lazily by the view via refreshNotificationAuthState().
+    }
+
+    func refreshNotificationAuthState() async {
+        notificationAuthState = await NotificationService.systemAuthorizationState()
+    }
+
+    func requestNotificationPermission() async {
+        isRequestingNotifications = true
+        notificationAuthState = await NotificationService.requestSystemAuthorization()
+        isRequestingNotifications = false
+    }
+
+    func openNotificationSystemSettings() {
+        NotificationService.openSystemSettings()
     }
 
     func save() async {

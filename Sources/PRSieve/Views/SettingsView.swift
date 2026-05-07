@@ -44,7 +44,10 @@ struct SettingsView: View {
             .padding(.vertical, 12)
         }
         .frame(width: 650, height: 580)
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            await viewModel.refreshNotificationAuthState()
+        }
         .onChange(of: viewModel.settings) { _, _ in
             Task { await viewModel.save() }
         }
@@ -165,8 +168,15 @@ struct SettingsView: View {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
             }
 
-            Section("Notifications") {
+            Section {
                 Toggle("Notify when Review PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
+                notificationAuthRow
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("PRSieve uses macOS system notifications. If you previously denied permission, allow it again in System Settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -181,6 +191,54 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var notificationAuthRow: some View {
+        HStack(spacing: 8) {
+            switch viewModel.notificationAuthState {
+            case .authorized:
+                Label("System permission granted", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+                Spacer()
+                Button("Open System Settings") {
+                    viewModel.openNotificationSystemSettings()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            case .denied:
+                Label("Blocked in System Settings", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Spacer()
+                Button("Open System Settings") {
+                    viewModel.openNotificationSystemSettings()
+                }
+                .controlSize(.small)
+                Button("Recheck") {
+                    Task { await viewModel.refreshNotificationAuthState() }
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            case .notDetermined:
+                Label("Permission not yet requested", systemImage: "bell.badge")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Spacer()
+                Button {
+                    Task { await viewModel.requestNotificationPermission() }
+                } label: {
+                    if viewModel.isRequestingNotifications {
+                        ProgressView().scaleEffect(0.5).frame(width: 14, height: 14)
+                    } else {
+                        Text("Enable")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(viewModel.isRequestingNotifications)
+            }
+        }
     }
 
     private var ignoredCIChecksText: Binding<String> {

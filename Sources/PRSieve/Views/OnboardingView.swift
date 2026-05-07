@@ -12,10 +12,11 @@ struct OnboardingView: View {
 
             Group {
                 switch viewModel.step {
-                case .welcome: welcomeStep
-                case .github:  githubStep
-                case .prompt:  promptStep
-                case .done:    doneStep
+                case .welcome:       welcomeStep
+                case .github:        githubStep
+                case .prompt:        promptStep
+                case .notifications: notificationsStep
+                case .done:          doneStep
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -207,6 +208,123 @@ struct OnboardingView: View {
         .padding(.vertical, 8)
     }
 
+    // MARK: - Notifications
+
+    private var notificationsStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Stay in the loop")
+                .font(.title2.weight(.semibold))
+
+            Text("PRSieve can post a macOS notification when a Review PR's CI turns green, and start automatically when you log in so it's always watching.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Notify me when Review PRs pass CI", isOn: $viewModel.notificationsEnabled)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    statusBadge
+                    Text(statusDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+
+                HStack(spacing: 10) {
+                    switch viewModel.notificationAuthState {
+                    case .notDetermined:
+                        Button {
+                            Task { await viewModel.requestNotificationPermission() }
+                        } label: {
+                            if viewModel.isRequestingNotifications {
+                                ProgressView().scaleEffect(0.6).frame(height: 16)
+                            } else {
+                                Text("Enable Notifications")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!viewModel.notificationsEnabled || viewModel.isRequestingNotifications)
+                    case .denied:
+                        Button("Open System Settings") {
+                            viewModel.openNotificationSystemSettings()
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Recheck") {
+                            Task { await viewModel.refreshNotificationAuthState() }
+                        }
+                        .buttonStyle(.borderless)
+                    case .authorized:
+                        EmptyView()
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
+            .opacity(viewModel.notificationsEnabled ? 1 : 0.5)
+            .disabled(!viewModel.notificationsEnabled)
+
+            Divider()
+                .padding(.vertical, 4)
+
+            Toggle(isOn: launchAtLoginBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Launch PRSieve at login")
+                    Text("Recommended — PRSieve has to be running to surface review requests.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Text("You can change everything here later in Settings.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
+        }
+        .padding(.vertical, 8)
+        .task { await viewModel.refreshNotificationAuthState() }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.launchAtLogin },
+            set: { viewModel.setLaunchAtLogin($0) }
+        )
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch viewModel.notificationAuthState {
+        case .authorized:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .denied:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .notDetermined:
+            Image(systemName: "bell.badge")
+                .foregroundStyle(.tint)
+        }
+    }
+
+    private var statusDescription: String {
+        switch viewModel.notificationAuthState {
+        case .authorized:
+            return "Notifications are enabled for PRSieve."
+        case .denied:
+            return "Notifications are blocked in System Settings. Open Settings to allow them."
+        case .notDetermined:
+            return "macOS hasn't asked yet. Click Enable Notifications to grant permission."
+        }
+    }
+
     // MARK: - Done
 
     private var doneStep: some View {
@@ -270,6 +388,12 @@ struct OnboardingView: View {
             .keyboardShortcut(.return, modifiers: [])
             .buttonStyle(.borderedProminent)
             .disabled(!viewModel.canAdvanceFromPrompt)
+        case .notifications:
+            Button("Continue") {
+                Task { await viewModel.advance() }
+            }
+            .keyboardShortcut(.return, modifiers: [])
+            .buttonStyle(.borderedProminent)
         case .done:
             Button("Done") {
                 Task {
