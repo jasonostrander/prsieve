@@ -8,9 +8,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.jasonostrander.prsieve</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>0.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>0.0.0</string>
     <key>CFBundleExecutable</key>
     <string>PRSieve</string>
     <key>CFBundleIconFile</key>
@@ -26,5 +26,11 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/jasonostrander/prsieve/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>aVt6u2PKc5rmO9JANWtblCSszKQ9kB+s+q5t5fsHLEI=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>

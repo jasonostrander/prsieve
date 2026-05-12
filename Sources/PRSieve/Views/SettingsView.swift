@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State var viewModel: SettingsViewModel
+    var updater: UpdaterServicing? = nil
     @State private var selectedTab = 0
 
     var body: some View {
@@ -189,6 +190,15 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            if let updater {
+                Section("Updates") {
+                    Toggle("Automatically check for updates", isOn: automaticUpdatesBinding(updater: updater))
+                    Button("Check for Updates Now") {
+                        updater.checkForUpdates()
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
     }
@@ -239,6 +249,13 @@ struct SettingsView: View {
                 .disabled(viewModel.isRequestingNotifications)
             }
         }
+    }
+
+    private func automaticUpdatesBinding(updater: UpdaterServicing) -> Binding<Bool> {
+        Binding(
+            get: { updater.automaticallyChecksForUpdates },
+            set: { updater.automaticallyChecksForUpdates = $0 }
+        )
     }
 
     private var ignoredCIChecksText: Binding<String> {

@@ -6,3 +6,5 @@ DerivedData/
 .DS_Store
 dist/
 llm_config.json
+sparkle_private_key.txt
+.claude/

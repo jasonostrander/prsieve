@@ -1,3 +1,4 @@
+import Sparkle
 import SwiftUI
 
 @main
@@ -12,18 +13,43 @@ struct PRSieveApp: App {
     }
 }
 
+// MARK: - Updater
+
+@MainActor
+final class SparkleUpdater: UpdaterServicing {
+    private let controller: SPUStandardUpdaterController
+
+    init() {
+        controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+    }
+
+    var automaticallyChecksForUpdates: Bool {
+        get { controller.updater.automaticallyChecksForUpdates }
+        set { controller.updater.automaticallyChecksForUpdates = newValue }
+    }
+
+    func checkForUpdates() {
+        controller.checkForUpdates(nil)
+    }
+}
+
 // MARK: - App Delegate
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let viewModel = DashboardViewModel()
     let appState = AppState()
+    let updater: UpdaterServicing = SparkleUpdater()
     private var statusBarController: StatusBarController?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusBarController = StatusBarController(viewModel: viewModel)
+        statusBarController = StatusBarController(viewModel: viewModel, updater: updater)
         statusBarController?.onOpenSettings = { [weak self] in
             self?.openSettings()
         }
@@ -47,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let persistence = viewModel.persistence else { return }
 
         let settingsVM = SettingsViewModel(persistence: persistence)
-        let settingsView = SettingsView(viewModel: settingsVM)
+        let settingsView = SettingsView(viewModel: settingsVM, updater: updater)
 
         let hostingController = NSHostingController(rootView: settingsView)
         hostingController.sizingOptions = .preferredContentSize

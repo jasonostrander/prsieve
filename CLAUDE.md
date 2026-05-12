@@ -6,7 +6,7 @@ macOS menu bar app for triaging GitHub PR review requests. Uses an LLM to catego
 
 - Swift 6 / SwiftUI, macOS 14+
 - Swift Package Manager (no Xcode required)
-- Zero external dependencies
+- One external dependency: [Sparkle](https://sparkle-project.org) for auto-updates
 - OpenAI-compatible API for LLM categorization
 
 ## Build & Run
@@ -18,12 +18,13 @@ cp llm_config.example.json llm_config.json   # one-time, then edit
 ./run.sh          # builds, bundles .app, and launches
 swift build       # build only
 ./test.sh         # compile and run tests (no Xcode/XCTest needed)
-./release.sh      # builds release .app and packages dist/PRSieve.dmg
+./release.sh 1.2.3            # builds, notarizes, tags, pushes, creates GitHub Release
+./release.sh 1.2.3 --no-publish  # local build + notarize, no git/GH side effects
 ```
 
-The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns + a binary-plist `llm_config.plist` derived from `llm_config.json` into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running.
+The app runs as a `.app` bundle created by `run.sh` (copies binary + Info.plist + AppIcon.icns + Sparkle.framework + a binary-plist `llm_config.plist` derived from `llm_config.json` into the bundle). Use `pkill -9 PRSieve` before relaunching if the old process is still running. `run.sh` strips Sparkle's `SUFeedURL`/`SUPublicEDKey` keys for dev builds so the local copy never tries to auto-update.
 
-`release.sh` produces a Developer ID-signed and notarized DMG (signed by `Developer ID Application: Jason Ostrander (TCL5ZG7A2L)`, notarized via the `PRSieve-notarize` keychain profile, ticket stapled). The bundled config is converted to **binary plist** at build time so corporate DLP (CrowdStrike) doesn't strip it from the DMG — plain JSON files get filtered.
+`release.sh` produces a Developer ID-signed and notarized **zip** (`dist/PRSieve.zip`), EdDSA-signs it for Sparkle, regenerates `appcast.xml`, and (unless `--no-publish`) tags + pushes + creates a GitHub Release. Signing identity SHA-1 is hardcoded to `Developer ID Application: Jason Ostrander (TCL5ZG7A2L)`; notarization uses the `PRSieve-notarize` keychain profile. The bundled config is converted to **binary plist** at build time so corporate DLP (CrowdStrike) doesn't strip it — plain JSON files get filtered. **Why zip and not DMG**: Apple's notary service silently rejects DMG-packaged bundles containing `Sparkle.framework` (`signature of the binary is invalid` on the main Mach-Os) even when the bytes are identical to a notarization-Accepted zip of the same `.app`. See `RELEASING.md` for the full investigation and Sparkle key-management instructions.
 
 To regenerate the app icon: `swift resources/generate_icon.swift`
 
@@ -48,6 +49,7 @@ Sources/PRSieve/
     NotificationService.swift   # macOS notifications via UNUserNotificationCenter
     PollingService.swift        # Orchestrates refresh: fetch -> categorize -> persist
     PersistenceService.swift    # JSON files in ~/Library/Application Support/PRSieve/
+    UpdaterService.swift        # UpdaterServicing protocol (Sparkle-free, so tests compile)
   ViewModels/
     DashboardViewModel.swift    # @Observable, drives the main view
     SettingsViewModel.swift     # Settings load/save
@@ -63,11 +65,12 @@ Sources/PRSieve/
 
 ## Key Design Decisions
 
-- **Menu bar app**: Runs as `LSUIElement` (no Dock icon). Left-click shows PR popover, right-click shows context menu (Refresh, Settings, Quit). Status bar icon turns orange when priority PRs with passing CI exist.
+- **Menu bar app**: Runs as `LSUIElement` (no Dock icon). Left-click shows PR popover, right-click shows context menu (Refresh, Check for Updates…, Settings, Quit). Status bar icon turns orange when priority PRs with passing CI exist.
 - **No Xcode**: Built entirely with SPM. `run.sh` creates a minimal .app bundle.
 - **No Keychain**: Tokens stored in `~/.../PRSieve/.tokens.json` with 0600 permissions (unsigned app causes Keychain prompts).
 - **LLM credentials baked into the bundle**: Endpoint, token, and model live in `llm_config.json` at the project root (gitignored). `run.sh`/`release.sh` convert it to a **binary plist** (`Contents/Resources/llm_config.plist`) and `LLMConfig.loadFromBundle()` reads it via `Bundle.main`. Use `llm_config.example.json` as the template. Users only configure the prompt (ownership context) via Settings. JSON-key is `token` (not `apiKey`) so corporate DLP doesn't recognize the file as credentials; binary plist further hides it from text-based scanners.
 - **Code signing**: `run.sh` ad-hoc signs (`--sign -`) for local dev. `release.sh` signs with Developer ID + hardened runtime + secure timestamp, then submits to Apple's notary service via `notarytool` (using the `PRSieve-notarize` keychain profile) and staples the ticket. The signing identity SHA-1 hash is hardcoded in `release.sh` to disambiguate when multiple Developer ID certs are installed.
+- **Auto-updates via Sparkle**: `SparkleUpdater` (in `PRSieveApp.swift`) wraps `SPUStandardUpdaterController` behind the `UpdaterServicing` protocol from `UpdaterService.swift`. The protocol lets the test build (which excludes `PRSieveApp.swift`) compile without linking Sparkle. `release.sh` EdDSA-signs the release zip; the public key (`SUPublicEDKey`) is baked into `resources/Info.plist`; the private key lives in the macOS Keychain (service `https://sparkle-project.org`, account `ed25519`) with a backup at `sparkle_private_key.txt` (gitignored). Appcast is served from `raw.githubusercontent.com/jasonostrander/prsieve/main/appcast.xml`. End-to-end test: `./scripts/test_sparkle.sh` (builds two notarized zips, installs the older one, serves the newer via localhost, waits for manual "Check for Updates…" click).
 - **Pre-filters before LLM**: Applied in order before any LLM call:
   1. Draft PRs → noise
   2. Release PRs → noise
@@ -103,6 +106,7 @@ Configured via the popover footer or right-click > Settings:
 - **Hide draft PRs**: Toggle (default on)
 - **Keep unreviewed priority PRs visible for 3 days after merge**: Toggle (default on)
 - **Notify when priority PRs pass CI**: Toggle (default on)
+- **Automatically check for updates**: Toggle (default on; Sparkle polls the appcast daily) + manual "Check for Updates Now" button
 
 ## Notifications
 

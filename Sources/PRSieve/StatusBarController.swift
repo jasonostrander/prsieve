@@ -7,12 +7,14 @@ final class StatusBarController: NSObject {
     private var popover: NSPopover
     private var eventMonitor: Any?
     private let viewModel: DashboardViewModel
+    private let updater: UpdaterServicing?
 
     var onOpenSettings: (() -> Void)?
     var onOpenOnboarding: (() -> Void)?
 
-    init(viewModel: DashboardViewModel) {
+    init(viewModel: DashboardViewModel, updater: UpdaterServicing? = nil) {
         self.viewModel = viewModel
+        self.updater = updater
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         popover.contentSize = NSSize(width: 420, height: 580)
@@ -95,6 +97,13 @@ final class StatusBarController: NSObject {
         onboardingItem.target = self
         menu.addItem(onboardingItem)
 
+        if updater != nil {
+            menu.addItem(.separator())
+            let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesAction), keyEquivalent: "")
+            updateItem.target = self
+            menu.addItem(updateItem)
+        }
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit PRSieve", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
@@ -116,6 +125,10 @@ final class StatusBarController: NSObject {
 
     @objc private func onboardingAction() {
         onOpenOnboarding?()
+    }
+
+    @objc private func checkForUpdatesAction() {
+        updater?.checkForUpdates()
     }
 
     private func togglePopover(_ sender: NSStatusBarButton) {
