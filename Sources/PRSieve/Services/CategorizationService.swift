@@ -134,6 +134,7 @@ actor CategorizationService {
             Author: \(pr.author)
             Age: \(ageStr)
             User is requested reviewer: \(pr.isRequestedReviewer ? "yes" : "no")
+            Direct codeowner: \(pr.isDirectCodeowner ? "yes" : "no")
             Description: \(String((pr.body ?? "").prefix(500)))
             Labels: \(pr.labels.joined(separator: ", "))
             Files changed:

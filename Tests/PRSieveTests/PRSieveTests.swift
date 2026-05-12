@@ -46,14 +46,17 @@ actor MockLLMClient: LLMProvider {
     var shouldThrow = false
     var throwError: LLMError = .requestFailed("mock error")
     var callCount = 0
+    var lastUserPrompt: String = ""
 
     func setResponse(_ response: String) { self.response = response }
     func setShouldThrow(_ value: Bool) { shouldThrow = value }
     func setThrowError(_ error: LLMError) { throwError = error }
     func getCallCount() -> Int { callCount }
+    func getLastUserPrompt() -> String { lastUserPrompt }
 
     func complete(systemPrompt: String, userPrompt: String) async throws -> String {
         callCount += 1
+        lastUserPrompt = userPrompt
         if shouldThrow { throw throwError }
         return response
     }
@@ -289,6 +292,23 @@ func runAllTests() async {
         t.checkEqual(result.reason, "Touches cart module", "LLM reason preserved")
         let calls = await llm.getCallCount()
         t.checkEqual(calls, 1, "LLM called once")
+    }
+
+    // isDirectCodeowner is threaded into the user prompt so the LLM can weight it
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        _ = await service.categorize(pr: makePR(isDirectCodeowner: true), codeowners: nil, userContext: "Checkout")
+        let prompt = await llm.getLastUserPrompt()
+        t.check(prompt.contains("Direct codeowner: yes"), "LLM prompt includes Direct codeowner: yes")
+    }
+
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        _ = await service.categorize(pr: makePR(isDirectCodeowner: false), codeowners: nil, userContext: "Checkout")
+        let prompt = await llm.getLastUserPrompt()
+        t.check(prompt.contains("Direct codeowner: no"), "LLM prompt includes Direct codeowner: no")
     }
 
     do {
