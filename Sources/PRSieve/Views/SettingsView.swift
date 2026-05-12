@@ -271,7 +271,7 @@ struct SettingsView: View {
     }
 
     private var versionText: String {
-        "\(BuildInfo.gitHash) · \(BuildInfo.buildDate)"
+        "v\(BuildInfo.appVersion) · \(BuildInfo.gitHash) · \(BuildInfo.buildDate)"
     }
 
     private var launchAtLoginBinding: Binding<Bool> {
