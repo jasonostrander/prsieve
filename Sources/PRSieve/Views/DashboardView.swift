@@ -36,11 +36,6 @@ struct DashboardView: View {
                     }
                     .help("Show only PRs with passing CI")
 
-                    Toggle(isOn: $viewModel.showMerged) {
-                        Image(systemName: "archivebox")
-                    }
-                    .help("Show merged PRs")
-
                     Button {
                         showSettings = true
                     } label: {

@@ -9,7 +9,6 @@ final class DashboardViewModel {
     var error: String?
     var llmError: LLMError?
     var searchText = ""
-    var showMerged = false
     var showReadyToMerge = false
     var hideDrafts = true
     var githubUsername = ""
@@ -34,7 +33,7 @@ final class DashboardViewModel {
         pullRequests
             .filter { isReviewedByMe($0) }
             .filter { !$0.isClosed }
-            .filter { showMerged || !$0.isMerged }
+            .filter { !$0.isMerged }
             .filter { !hideDrafts || !$0.isDraft }
             .filter { searchText.isEmpty || matchesSearch($0) }
             .sorted { $0.updatedAt > $1.updatedAt }
@@ -75,7 +74,7 @@ final class DashboardViewModel {
         pullRequests
             .filter { $0.category == category }
             .filter { !$0.isClosed }
-            .filter { showMerged || !$0.isMerged || isUnreviewedPriorityWithinGracePeriod($0) }
+            .filter { !$0.isMerged || isUnreviewedPriorityWithinGracePeriod($0) }
             .filter { !hideDrafts || !$0.isDraft }
             .filter { !showReadyToMerge || $0.buildStatus == .passed }
             .filter { searchText.isEmpty || matchesSearch($0) }

@@ -90,13 +90,6 @@ struct MenuBarPRListView: View {
                 .controlSize(.small)
                 .help("Show only PRs with passing CI")
 
-                Toggle(isOn: $viewModel.showMerged) {
-                    Image(systemName: "archivebox")
-                }
-                .toggleStyle(.button)
-                .controlSize(.small)
-                .help("Show merged PRs")
-
                 Button {
                     showSearch.toggle()
                     if showSearch {
