@@ -1,0 +1,21 @@
+<?xml version="1.0" standalone="yes"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>PRSieve</title>
+        <link>https://github.com/jasonostrander/prsieve</link>
+        <description>PRSieve updates feed</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.9.0</title>
+            <pubDate>Wed, 13 May 2026 16:18:56 +0000</pubDate>
+            <sparkle:version>0.9.0</sparkle:version>
+            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.0/PRSieve.zip"
+                sparkle:edSignature="STpWgGNzE06owXG/1CyhAoZd7mSZZShqXpB7n7kOmgi4dvc77+HTmP06tEHqxwwyM4aj616+UKUNypzyWhofAg=="
+                length="2402990"
+                type="application/octet-stream" />
+        </item>
+    </channel>
+</rss>
