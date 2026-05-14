@@ -77,6 +77,7 @@ Sources/PRSieve/
   3. Strings/l10n PRs → noise
   4. @mentioned in comments → priority
   5. User previously left a review (any non-pending state) → priority
+  6. User is the sole non-agent reviewer assigned → priority (`isBot` covers app-style agents like `olive-agent[bot]`; `agentReviewerTeams` in `GitHubClient` covers rotation-bot teams like `icapp-android-secondary-rotation`)
   - Everything else goes to the LLM.
 - **CODEOWNERS parsing**: Parses repo CODEOWNERS files with gitignore-style glob matching. `isDirectCodeowner` is set to true when the user owns specific (non-catch-all) patterns for the changed files. Passed to the LLM as context.
 - **LLM prompt focuses on file paths**: System prompt in `LLMSystemPrompt.swift` tells the LLM to categorize based on changed file paths and the user's ownership context. Edit that file to tune behavior.

@@ -63,6 +63,11 @@ actor CategorizationService {
             return CategorizationResult(category: .priority, reason: "You previously reviewed this PR")
         }
 
+        // Pre-filter: user is the only non-agent reviewer requested → priority
+        if pr.isSoleHumanReviewer {
+            return CategorizationResult(category: .priority, reason: "You are the only reviewer assigned")
+        }
+
         // Everything else → LLM
         do {
             return try await llmCategorize(pr: pr, codeowners: codeowners, userContext: userContext)

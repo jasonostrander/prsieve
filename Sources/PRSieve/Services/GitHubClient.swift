@@ -119,15 +119,22 @@ actor GitHubClient {
         async let reviewsData = fetch(repoURL(repo, path: "/pulls/\(number)/reviews"))
         async let reviewCommentsData = fetch(repoURL(repo, path: "/pulls/\(number)/comments"))
         async let issueCommentsData = fetch(repoURL(repo, path: "/issues/\(number)/comments"))
+        async let timelineData = fetch(repoURL(repo, path: "/issues/\(number)/timeline?per_page=100"))
         async let statusResult = fetchCombinedStatus(repo: repo, ref: ghPR.head.sha)
 
         let files = try decoder.decode([GitHubFile].self, from: try await filesData)
         let reviews = try decoder.decode([GitHubReview].self, from: try await reviewsData)
         let reviewComments = try decoder.decode([GitHubComment].self, from: try await reviewCommentsData)
         let issueComments = try decoder.decode([GitHubComment].self, from: try await issueCommentsData)
+        let timeline = (try? decoder.decode([GitHubTimelineEvent].self, from: try await timelineData)) ?? []
         let buildStatus = try await statusResult
 
         let reviewers = Self.perReviewerStatus(from: reviews)
+        let isSoleHumanReviewer = Self.isSoleHumanReviewer(
+            username: username ?? "",
+            requestedReviewers: ghPR.requestedReviewers,
+            timeline: timeline
+        )
 
         let humanCommentCount = (reviewComments + issueComments)
             .filter { !Self.isBot($0.user.login) }
@@ -163,6 +170,7 @@ actor GitHubClient {
             isRequestedReviewer: false,
             isDirectCodeowner: false,
             isMentioned: isMentioned,
+            isSoleHumanReviewer: isSoleHumanReviewer,
             category: .low,
             categoryOverridden: false,
             categoryReason: "",
@@ -306,6 +314,52 @@ actor GitHubClient {
             }
     }
 
+    /// Team slugs that should not count as "another reviewer" when checking
+    /// whether the user is the sole human reviewer (e.g. rotation bots
+    /// implemented as a team rather than a GitHub App).
+    static let agentReviewerTeams: Set<String> = [
+        "icapp-android-secondary-rotation",
+    ]
+
+    /// True iff the user is currently a requested reviewer AND no other
+    /// non-bot human or non-agent team was ever assigned as a reviewer
+    /// (per the PR timeline). Proactive reviews from people who were
+    /// never requested do NOT disqualify.
+    static func isSoleHumanReviewer(
+        username: String,
+        requestedReviewers: [GitHubUser]?,
+        timeline: [GitHubTimelineEvent]
+    ) -> Bool {
+        guard !username.isEmpty else { return false }
+        let usernameLower = username.lowercased()
+        let current = requestedReviewers ?? []
+        guard current.contains(where: { $0.login.caseInsensitiveCompare(username) == .orderedSame }) else {
+            return false
+        }
+
+        // Replay assignment events to get the set of users/teams that were ever
+        // requested and not subsequently removed. GitHub does NOT emit a
+        // `review_request_removed` when a reviewer submits a review, so a
+        // requested reviewer who reviewed still counts as assigned.
+        var assignedUsers: Set<String> = []
+        var assignedTeams: Set<String> = []
+        for e in timeline {
+            switch e.event {
+            case "review_requested":
+                if let u = e.requestedReviewer { assignedUsers.insert(u.login.lowercased()) }
+                if let t = e.requestedTeam { assignedTeams.insert(t.slug) }
+            case "review_request_removed":
+                if let u = e.requestedReviewer { assignedUsers.remove(u.login.lowercased()) }
+                if let t = e.requestedTeam { assignedTeams.remove(t.slug) }
+            default: break
+            }
+        }
+
+        let otherHumans = assignedUsers.filter { $0 != usernameLower && !isBot($0) }
+        guard otherHumans.isEmpty else { return false }
+        return assignedTeams.allSatisfy { agentReviewerTeams.contains($0) }
+    }
+
     static func isBot(_ login: String) -> Bool {
         let lowered = login.lowercased()
         return lowered.hasSuffix("[bot]")
@@ -380,6 +434,19 @@ struct GitHubPR: Decodable, Sendable {
     let base: GitHubRef
     let labels: [GitHubLabel]
     let requestedReviewers: [GitHubUser]?
+}
+
+struct GitHubTeam: Decodable, Sendable {
+    let slug: String
+}
+
+/// One entry from the issues timeline. Many event types exist; we only
+/// decode the fields we need and keep everything optional because the
+/// payload shape varies per event.
+struct GitHubTimelineEvent: Decodable, Sendable {
+    let event: String?
+    let requestedReviewer: GitHubUser?
+    let requestedTeam: GitHubTeam?
 }
 
 struct GitHubUser: Decodable, Sendable {

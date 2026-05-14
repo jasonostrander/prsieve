@@ -50,6 +50,7 @@ struct PullRequest: Identifiable, Codable, Sendable {
     var isRequestedReviewer: Bool
     var isDirectCodeowner: Bool
     var isMentioned: Bool
+    var isSoleHumanReviewer: Bool
     var category: PRCategory
     var categoryOverridden: Bool
     var categoryReason: String

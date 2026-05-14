@@ -71,6 +71,7 @@ func makePR(
     isMentioned: Bool = false,
     isRequestedReviewer: Bool = true,
     isDirectCodeowner: Bool = false,
+    isSoleHumanReviewer: Bool = false,
     updatedAt: Date = Date(),
     baseBranch: String = "feature"
 ) -> PullRequest {
@@ -94,6 +95,7 @@ func makePR(
         isRequestedReviewer: isRequestedReviewer,
         isDirectCodeowner: isDirectCodeowner,
         isMentioned: isMentioned,
+        isSoleHumanReviewer: isSoleHumanReviewer,
         category: .low,
         categoryOverridden: false,
         categoryReason: "",
@@ -279,6 +281,125 @@ func runAllTests() async {
         let svc5 = CategorizationService(llmClient: llm5)
         let r5 = await svc5.categorize(pr: prNoUser, codeowners: nil, userContext: "", username: "")
         t.checkEqual(r5.category, .low, "empty username → falls through to LLM")
+    }
+
+    // --- Pre-filter: Sole Human Reviewer ---
+
+    do {
+        let llm = MockLLMClient()
+        let service = CategorizationService(llmClient: llm)
+        let pr = makePR(isSoleHumanReviewer: true)
+        let result = await service.categorize(pr: pr, codeowners: nil, userContext: "", username: "testuser")
+        t.checkEqual(result.category, .priority, "sole reviewer → priority")
+        t.check(result.reason.contains("only reviewer"), "sole reviewer reason")
+        t.checkEqual(await llm.getCallCount(), 0, "sole reviewer skips LLM")
+    }
+
+    // --- isSoleHumanReviewer computation ---
+
+    do {
+        func user(_ login: String) -> GitHubUser {
+            GitHubUser(login: login, avatarUrl: "https://example.com/\(login).png")
+        }
+        func reviewRequested(_ login: String) -> GitHubTimelineEvent {
+            GitHubTimelineEvent(event: "review_requested", requestedReviewer: user(login), requestedTeam: nil)
+        }
+        func reviewRequestedTeam(_ slug: String) -> GitHubTimelineEvent {
+            GitHubTimelineEvent(event: "review_requested", requestedReviewer: nil, requestedTeam: GitHubTeam(slug: slug))
+        }
+        func reviewRemoved(_ login: String) -> GitHubTimelineEvent {
+            GitHubTimelineEvent(event: "review_request_removed", requestedReviewer: user(login), requestedTeam: nil)
+        }
+        func reviewRemovedTeam(_ slug: String) -> GitHubTimelineEvent {
+            GitHubTimelineEvent(event: "review_request_removed", requestedReviewer: nil, requestedTeam: GitHubTeam(slug: slug))
+        }
+
+        // Sole human, lone request → true
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason")]
+        ), "lone human → sole")
+
+        // Olive app (bot) also requested → still sole
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason"), user("olive-agent[bot]")],
+            timeline: [reviewRequested("jason"), reviewRequested("olive-agent[bot]")]
+        ), "human + bot agent → sole")
+
+        // Another human currently requested → not sole
+        t.check(!GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason"), user("alice")],
+            timeline: [reviewRequested("jason"), reviewRequested("alice")]
+        ), "two humans requested → not sole")
+
+        // Someone else was requested AND reviewed (so dropped from
+        // requested_reviewers but the request event remains) → not sole
+        t.check(!GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason"), reviewRequested("alice")]
+        ), "another human assigned and already reviewed → not sole")
+
+        // Someone PROACTIVELY reviewed without ever being requested → still sole
+        // (only review_requested events count; reviewed events do not)
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason")]
+        ), "proactive reviewer (not in timeline as requested) → sole")
+
+        // Someone was requested then unrequested → not assigned → still sole
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason"), reviewRequested("alice"), reviewRemoved("alice")]
+        ), "other reviewer requested then removed → sole")
+
+        // Non-agent team requested → not sole
+        t.check(!GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason"), reviewRequestedTeam("ios-platform")]
+        ), "user + non-agent team → not sole")
+
+        // Non-agent team requested then removed → sole
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason"), reviewRequestedTeam("ios-platform"), reviewRemovedTeam("ios-platform")]
+        ), "non-agent team removed → sole")
+
+        // Secondary-rotation team is treated as agent → sole
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason"), reviewRequestedTeam("icapp-android-secondary-rotation")]
+        ), "user + secondary-rotation team → sole")
+
+        // User not currently requested (already reviewed, removed from requested_reviewers) → false
+        // "previously reviewed" pre-filter handles that case separately.
+        t.check(!GitHubClient.isSoleHumanReviewer(
+            username: "jason",
+            requestedReviewers: [],
+            timeline: [reviewRequested("jason")]
+        ), "user not currently requested → not sole")
+
+        // Empty username → false
+        t.check(!GitHubClient.isSoleHumanReviewer(
+            username: "",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("jason")]
+        ), "empty username → not sole")
+
+        // Case-insensitive match
+        t.check(GitHubClient.isSoleHumanReviewer(
+            username: "Jason",
+            requestedReviewers: [user("jason")],
+            timeline: [reviewRequested("Jason")]
+        ), "case-insensitive username match")
     }
 
     // --- LLM Categorization ---
