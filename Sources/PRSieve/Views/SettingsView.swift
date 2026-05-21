@@ -66,8 +66,45 @@ struct SettingsView: View {
         Form {
             Section("Account") {
                 TextField("Username", text: $viewModel.settings.githubUsername)
-                SecureField("Personal Access Token", text: $viewModel.githubToken)
-                    .textContentType(.password)
+                    .onChange(of: viewModel.settings.githubUsername) { _, _ in
+                        viewModel.githubTestResult = nil
+                    }
+                HStack {
+                    SecureField("Personal Access Token", text: $viewModel.githubToken)
+                        .textContentType(.password)
+                        .onChange(of: viewModel.githubToken) { _, _ in
+                            viewModel.githubTestResult = nil
+                        }
+                    Button {
+                        Task { await viewModel.testGitHubAuth() }
+                    } label: {
+                        if viewModel.isTestingGitHub {
+                            ProgressView().scaleEffect(0.6).frame(width: 32)
+                        } else {
+                            Text("Test")
+                        }
+                    }
+                    .disabled(viewModel.isTestingGitHub || viewModel.githubToken.isEmpty)
+                    .frame(width: 44)
+                }
+                if let result = viewModel.githubTestResult {
+                    switch result {
+                    case .success(let login, let matches):
+                        if matches {
+                            Label("Authenticated as \(login)", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        } else {
+                            Label("Token works but belongs to \(login), not the configured username", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                        }
+                    case .failure(let msg):
+                        Label(msg, systemImage: "exclamationmark.circle.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
             }
 
             Section("Repositories") {

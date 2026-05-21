@@ -261,6 +261,16 @@ actor GitHubClient {
         return nil
     }
 
+    // MARK: - Token verification
+
+    /// Verify the token by hitting GET /user. Returns the authenticated user's login.
+    func verifyToken() async throws -> String {
+        let url = baseURL.appendingPathComponent("user")
+        let data = try await fetch(url)
+        struct GitHubUserInfo: Decodable { let login: String }
+        return try decoder.decode(GitHubUserInfo.self, from: data).login
+    }
+
     // MARK: - Check if user is mentioned in PR comments
 
     func isUserMentioned(repo: String, number: Int, username: String) async throws -> Bool {

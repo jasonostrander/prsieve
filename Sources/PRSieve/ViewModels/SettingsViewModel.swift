@@ -5,6 +5,11 @@ enum LLMTestResult {
     case failure(String)
 }
 
+enum GitHubTestResult {
+    case success(login: String, usernameMatches: Bool)
+    case failure(String)
+}
+
 struct PromptTestResult: Identifiable, Sendable {
     var id: String { pr.id }
     let pr: PullRequest
@@ -37,6 +42,8 @@ final class SettingsViewModel {
     var saveError: String?
     var llmTestResult: LLMTestResult?
     var isTestingLLM = false
+    var githubTestResult: GitHubTestResult?
+    var isTestingGitHub = false
     var notificationAuthState: NotificationAuthState = .notDetermined
     var isRequestingNotifications = false
 
@@ -86,6 +93,29 @@ final class SettingsViewModel {
             saveError = error.localizedDescription
         }
         isSaving = false
+    }
+
+    func testGitHubAuth() async {
+        let token = githubToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            githubTestResult = .failure("Enter a personal access token first.")
+            return
+        }
+        isTestingGitHub = true
+        githubTestResult = nil
+        defer { isTestingGitHub = false }
+
+        let client = GitHubClient(token: token)
+        do {
+            let login = try await client.verifyToken()
+            let configured = settings.githubUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matches = configured.isEmpty || login.caseInsensitiveCompare(configured) == .orderedSame
+            githubTestResult = .success(login: login, usernameMatches: matches)
+        } catch let err as GitHubError {
+            githubTestResult = .failure(err.errorDescription ?? "Request failed")
+        } catch {
+            githubTestResult = .failure(error.localizedDescription)
+        }
     }
 
     func testLLMConfig() async {
