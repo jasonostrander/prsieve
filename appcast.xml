@@ -6,15 +6,15 @@
         <description>PRSieve updates feed</description>
         <language>en</language>
         <item>
-            <title>Version 0.9.1</title>
-            <pubDate>Thu, 21 May 2026 03:25:10 +0000</pubDate>
-            <sparkle:version>0.9.1</sparkle:version>
-            <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
+            <title>Version 0.9.2</title>
+            <pubDate>Thu, 21 May 2026 15:48:10 +0000</pubDate>
+            <sparkle:version>0.9.2</sparkle:version>
+            <sparkle:shortVersionString>0.9.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure
-                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.1/PRSieve.zip"
-                sparkle:edSignature="k/AlpmQSEpKep2b6ArG+YAuGaoyOnjS7+H165+4251bM5pTGnhUxbCt3PqjsdFwWcKsUlXN7dHRFYo0t4FALDg=="
-                length="2499642"
+                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.2/PRSieve.zip"
+                sparkle:edSignature="sIyd/40f5OAeGo/dDQs1MLxdtF2VuV1fXMIn42mKnZdFv7SVHrlxL99duh9sFDg66dEytCtI7YADtnX59srrCw=="
+                length="2511554"
                 type="application/octet-stream" />
         </item>
     </channel>
