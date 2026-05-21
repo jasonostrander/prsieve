@@ -68,14 +68,27 @@ struct SettingsView: View {
             }
 
             Section("Repositories") {
-                List {
+                if viewModel.settings.repos.isEmpty {
+                    Text("No repositories added yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
                     ForEach(viewModel.settings.repos) { repo in
-                        Text(repo.repo)
-                            .font(.body.monospaced())
+                        HStack {
+                            Text(repo.repo)
+                                .font(.body.monospaced())
+                            Spacer()
+                            Button {
+                                viewModel.removeRepo(repo)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove \(repo.repo)")
+                        }
                     }
-                    .onDelete(perform: viewModel.removeRepo)
                 }
-                .frame(minHeight: 80)
 
                 HStack {
                     TextField("owner/repo", text: $viewModel.newRepoText)

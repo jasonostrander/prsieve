@@ -1595,6 +1595,24 @@ func runAllTests() async {
         t.checkEqual(vm2.launchAtLogin, true, "load restores launchAtLogin")
     }
 
+    // --- SettingsViewModel: add/remove repos ---
+
+    if let persistence = try? PersistenceService(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)) {
+        let vm = SettingsViewModel(persistence: persistence)
+        vm.settings.repos = [
+            RepoConfig(repo: "owner/one"),
+            RepoConfig(repo: "owner/two"),
+            RepoConfig(repo: "owner/three"),
+        ]
+        vm.removeRepo(RepoConfig(repo: "owner/two"))
+        t.checkEqual(vm.settings.repos.map(\.repo), ["owner/one", "owner/three"], "removeRepo(_:) removes the matching repo by id")
+
+        vm.removeRepo(RepoConfig(repo: "owner/missing"))
+        t.checkEqual(vm.settings.repos.map(\.repo), ["owner/one", "owner/three"], "removeRepo(_:) is a no-op for unknown repo")
+    } else {
+        t.check(false, "PersistenceService temp init succeeds for SettingsViewModel test")
+    }
+
     // --- Report ---
     t.report()
     if !t.failedTests.isEmpty {

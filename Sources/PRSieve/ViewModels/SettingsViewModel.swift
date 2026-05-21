@@ -109,4 +109,8 @@ final class SettingsViewModel {
     func removeRepo(at offsets: IndexSet) {
         settings.repos.remove(atOffsets: offsets)
     }
+
+    func removeRepo(_ repo: RepoConfig) {
+        settings.repos.removeAll { $0.id == repo.id }
+    }
 }
