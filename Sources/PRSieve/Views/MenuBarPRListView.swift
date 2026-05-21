@@ -140,6 +140,9 @@ struct MenuBarPRListView: View {
             if let llm = viewModel.llmErrorDescription {
                 llmErrorBanner(llm)
             }
+            if !viewModel.repoErrors.isEmpty {
+                repoErrorBanner(viewModel.repoErrors)
+            }
 
             // PR list
             PRListContent(viewModel: viewModel, compact: true)
@@ -178,6 +181,44 @@ struct MenuBarPRListView: View {
         }
         .frame(width: 420, height: 580)
         .focusEffectDisabled()
+    }
+
+    private func repoErrorBanner(_ errors: [RepoFetchError]) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(errors.count == 1
+                     ? "Couldn't fetch \(errors[0].repo)"
+                     : "Couldn't fetch \(errors.count) repos")
+                    .font(.caption.weight(.semibold))
+                Text(errors.map { "\($0.repo): \($0.message)" }.joined(separator: "\n"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            Spacer()
+            Button {
+                onOpenSettings?()
+            } label: {
+                Text("Settings")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            Button {
+                viewModel.repoErrors = []
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.orange.opacity(0.08))
     }
 
     private func llmErrorBanner(_ info: (title: String, suggestion: String)) -> some View {

@@ -8,6 +8,7 @@ final class DashboardViewModel {
     var lastRefresh: Date?
     var error: String?
     var llmError: LLMError?
+    var repoErrors: [RepoFetchError] = []
     var searchText = ""
     var showReadyToMerge = false
     var hideDrafts = true
@@ -125,6 +126,7 @@ final class DashboardViewModel {
             let result = try await pollingService.refresh()
             pullRequests = result.prs
             llmError = result.llmError
+            repoErrors = result.repoErrors
             lastRefresh = Date()
             isInitialLoad = false
             invalidateSummaries()

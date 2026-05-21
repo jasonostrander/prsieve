@@ -60,6 +60,9 @@ struct DashboardView: View {
                 if let llm = viewModel.llmErrorDescription {
                     llmErrorBanner(llm, onSettings: { showSettings = true })
                 }
+                if !viewModel.repoErrors.isEmpty {
+                    repoErrorBanner(viewModel.repoErrors, onSettings: { showSettings = true })
+                }
                 if let error = viewModel.error {
                     errorBanner(error)
                 }
@@ -109,6 +112,40 @@ struct DashboardView: View {
         }
         .padding(10)
         .background(.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal)
+        .padding(.bottom, 4)
+    }
+
+    private func repoErrorBanner(_ errors: [RepoFetchError], onSettings: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(errors.count == 1
+                     ? "Couldn't fetch \(errors[0].repo)"
+                     : "Couldn't fetch \(errors.count) repos")
+                    .font(.caption.weight(.semibold))
+                Text(errors.map { "\($0.repo): \($0.message)" }.joined(separator: "\n"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Settings") { onSettings() }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.orange)
+            Button {
+                viewModel.repoErrors = []
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.orange.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal)
         .padding(.bottom, 4)

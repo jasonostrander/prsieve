@@ -1,8 +1,14 @@
 import Foundation
 
+struct RepoFetchError: Sendable, Equatable {
+    let repo: String
+    let message: String
+}
+
 struct RefreshResult: Sendable {
     let prs: [PullRequest]
     let llmError: LLMError?
+    let repoErrors: [RepoFetchError]
 }
 
 actor PollingService {
@@ -34,7 +40,7 @@ actor PollingService {
 
     /// Perform a full refresh: fetch PRs, categorize new ones, fetch build status.
     func refresh() async throws -> RefreshResult {
-        guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil) }
+        guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil, repoErrors: []) }
 
         let existingPRs = await persistence.loadPullRequests()
         var existingByID: [String: PullRequest] = [:]
@@ -46,6 +52,7 @@ actor PollingService {
         var codeownersCache: [String: String] = [:]
 
         var allPRs: [PullRequest] = []
+        var repoErrors: [RepoFetchError] = []
 
         for repoConfig in settings.repos {
             let repo = repoConfig.repo
@@ -65,28 +72,43 @@ actor PollingService {
                 }
             }
 
-            // Fetch review requests and PRs previously reviewed by user (in parallel)
-            async let requestedPRs = githubClient.fetchReviewRequests(
-                repo: repo,
-                username: settings.githubUsername
-            )
-            async let reviewedPRs = githubClient.fetchReviewedByUser(
-                repo: repo,
-                username: settings.githubUsername
-            )
+            // Fetch review requests and PRs previously reviewed by user (in parallel).
+            // A failure for one repo must NOT abort the whole refresh — other repos
+            // (and disappeared-PR recovery below) still need to run.
+            let mergedPRs: [(pr: PullRequest, isRequested: Bool)]
+            do {
+                async let requestedPRs = githubClient.fetchReviewRequests(
+                    repo: repo,
+                    username: settings.githubUsername
+                )
+                async let reviewedPRs = githubClient.fetchReviewedByUser(
+                    repo: repo,
+                    username: settings.githubUsername
+                )
 
-            // Merge: review-requested PRs take precedence; reviewed-by fills in the rest
-            var seenIDs = Set<String>()
-            var mergedPRs: [(pr: PullRequest, isRequested: Bool)] = []
-            for pr in (try await requestedPRs) {
-                if seenIDs.insert(pr.id).inserted {
-                    mergedPRs.append((pr, true))
+                // Merge: review-requested PRs take precedence; reviewed-by fills in the rest
+                var seenIDs = Set<String>()
+                var merged: [(pr: PullRequest, isRequested: Bool)] = []
+                for pr in (try await requestedPRs) {
+                    if seenIDs.insert(pr.id).inserted {
+                        merged.append((pr, true))
+                    }
                 }
-            }
-            for pr in (try await reviewedPRs) {
-                if seenIDs.insert(pr.id).inserted {
-                    mergedPRs.append((pr, false))
+                for pr in (try await reviewedPRs) {
+                    if seenIDs.insert(pr.id).inserted {
+                        merged.append((pr, false))
+                    }
                 }
+                mergedPRs = merged
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                NSLog("PRSieve: failed to fetch PRs for \(repo): \(message)")
+                repoErrors.append(RepoFetchError(repo: repo, message: message))
+                // Preserve any cached PRs for this repo so they don't disappear from the UI.
+                for (_, existing) in existingByID where existing.repoFullName == repo {
+                    allPRs.append(existing)
+                }
+                continue
             }
 
             // Apply overrides and collect PRs needing categorization
@@ -236,6 +258,6 @@ actor PollingService {
         try await persistence.savePullRequests(allPRs)
 
         let llmError = await categorizationService.consumeLastLLMError()
-        return RefreshResult(prs: allPRs, llmError: llmError)
+        return RefreshResult(prs: allPRs, llmError: llmError, repoErrors: repoErrors)
     }
 }
