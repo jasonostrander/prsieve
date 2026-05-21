@@ -1613,6 +1613,45 @@ func runAllTests() async {
         t.check(false, "PersistenceService temp init succeeds for SettingsViewModel test")
     }
 
+    // --- PromptTestResult sort ---
+
+    do {
+        let now = Date()
+        func result(_ id: String, old: PRCategory, new: PRCategory, ageHours: Double) -> PromptTestResult {
+            let pr = makePR(title: id, updatedAt: now.addingTimeInterval(-ageHours * 3600))
+            return PromptTestResult(
+                pr: pr,
+                originalCategory: old,
+                originalReason: nil,
+                newCategory: new,
+                newReason: "test"
+            )
+        }
+
+        let unchangedPriorityOld = result("unchanged-priority", old: .priority, new: .priority, ageHours: 5)
+        let changedToPriority = result("changed-priority", old: .low, new: .priority, ageHours: 1)
+        let unchangedLow = result("unchanged-low", old: .low, new: .low, ageHours: 2)
+        let changedToNoise = result("changed-noise", old: .low, new: .noise, ageHours: 3)
+
+        let sorted = [unchangedPriorityOld, changedToPriority, unchangedLow, changedToNoise]
+            .sorted(by: PromptTestResult.defaultSort)
+
+        t.checkEqual(sorted[0].pr.title, "changed-priority", "changed rows come first, ordered by new category (priority)")
+        t.checkEqual(sorted[1].pr.title, "changed-noise", "changed rows come first, ordered by new category (noise)")
+        t.checkEqual(sorted[2].pr.title, "unchanged-priority", "then unchanged rows by new category (priority)")
+        t.checkEqual(sorted[3].pr.title, "unchanged-low", "then unchanged rows by new category (low)")
+
+        // Tie-break by updatedAt descending: two changed→priority entries
+        let earlyChange = result("early-change", old: .low, new: .priority, ageHours: 10)
+        let recentChange = result("recent-change", old: .low, new: .priority, ageHours: 1)
+        let tied = [earlyChange, recentChange].sorted(by: PromptTestResult.defaultSort)
+        t.checkEqual(tied[0].pr.title, "recent-change", "tie-break favors more recently updated PR")
+
+        // `changed` flag
+        t.check(changedToPriority.changed, "changed is true when categories differ")
+        t.check(!unchangedLow.changed, "changed is false when categories match")
+    }
+
     // --- Report ---
     t.report()
     if !t.failedTests.isEmpty {

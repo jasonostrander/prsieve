@@ -45,6 +45,9 @@ struct SettingsView: View {
             .padding(.vertical, 12)
         }
         .frame(width: 650, height: 580)
+        .sheet(isPresented: $viewModel.isPromptTestSheetPresented) {
+            PromptTestSheet(viewModel: viewModel)
+        }
         .task {
             await viewModel.load()
             await viewModel.refreshNotificationAuthState()
@@ -152,8 +155,22 @@ struct SettingsView: View {
                 TextEditor(text: $viewModel.settings.codeownerContext)
                     .frame(minHeight: 180)
                     .font(.body.monospaced())
+                HStack {
+                    Spacer()
+                    Button {
+                        viewModel.startPromptTest()
+                    } label: {
+                        Label("Test against my PRs", systemImage: "play.circle")
+                    }
+                    .disabled(viewModel.settings.llmModel.isEmpty)
+                    .help("Run the current prompt against your currently loaded PRs and see how each would be categorized")
+                }
             } header: {
                 Text("Your Code Ownership Context")
+            } footer: {
+                Text("Test runs the prompt against PRs already loaded in the dashboard. Refresh first if you want fresh data.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
