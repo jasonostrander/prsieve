@@ -57,6 +57,13 @@ if [[ "$PUBLISH" -eq 1 ]]; then
         echo "error: 'gh' (GitHub CLI) is required to publish. Install via 'brew install gh' or pass --no-publish."
         exit 1
     fi
+    # Release commit + tag always target main (Sparkle reads appcast.xml from main).
+    # Refuse to release from a branch that's behind or diverged from origin/main.
+    git fetch origin main --quiet
+    if ! git merge-base --is-ancestor origin/main HEAD; then
+        echo "error: origin/main has commits not in HEAD. Pull/rebase onto main before releasing."
+        exit 1
+    fi
 fi
 
 # Generate build info (git hash + build date), reset on exit
@@ -204,7 +211,9 @@ if [[ "$PUBLISH" -eq 1 ]]; then
     git add appcast.xml
     git commit -m "Release v${VERSION}"
     git tag "$TAG"
-    git push origin HEAD
+    # Push to main explicitly: this script may run from a worktree branch, but
+    # the appcast.xml must live on main for Sparkle to find it.
+    git push origin HEAD:main
     git push origin "$TAG"
     gh release create "$TAG" "$ZIP_PATH" \
         --repo "$GITHUB_REPO" \
