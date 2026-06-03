@@ -85,6 +85,7 @@ Sources/PRSieve/
 - **CI status via GitHub**: Uses the combined commit status API (`/commits/{sha}/status`). Status bar icon only highlights orange for priority PRs with passing CI.
 - **Actor-based services**: GitHubClient, LLMClient, PersistenceService, PollingService are all actors for thread safety.
 - **Bounded concurrency**: PR detail fetching and LLM categorization use TaskGroup with max 5 concurrent operations.
+- **Categorization caching**: A PR keeps its stored category (skipping re-categorization and the LLM call it implies) when it hasn't changed since it was last categorized — `pr.updatedAt <= lastCategorizedAt` — *and* the non-`updatedAt` inputs are unchanged. Those inputs (system prompt, ownership context, username, codeowner/reviewer flags) are captured in `PullRequest.categorizationContextHash`, a stable FNV-1a fingerprint (`PollingService.categorizationFingerprint`). `PollingService.canReuseCategorization` is the reuse gate. Editing the ownership prompt, shipping a new `llmSystemPrompt`, or a CODEOWNERS change all flip the fingerprint and force a one-time recompute; legacy PRs with a nil hash also recompute once.
 - **LLMProvider protocol**: Enables mock LLM in tests without network calls.
 - **Tests without XCTest**: Uses a lightweight custom test runner compiled via `test.sh` (works with Command Line Tools only, no Xcode SDK needed).
 - **Disappeared PR handling**: PRs that vanish from GitHub search results (e.g. review dismissed, team assignment) are re-fetched to check actual state before marking merged.

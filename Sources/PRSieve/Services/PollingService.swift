@@ -38,6 +38,61 @@ actor PollingService {
         self.settings = settings
     }
 
+    // MARK: - Categorization caching
+
+    /// Deterministic fingerprint of the categorization inputs that are *not*
+    /// reflected by a PR's `updatedAt` (the LLM system prompt, the user's ownership
+    /// context, their username, and the codeowner/reviewer flags). When this is
+    /// unchanged and the PR hasn't been touched, re-categorizing would produce the
+    /// same answer, so we can reuse the stored verdict and skip the LLM call.
+    ///
+    /// Uses FNV-1a so the value is stable across launches (Swift's `Hasher` is
+    /// per-run randomized and would invalidate the cache on every restart).
+    static func categorizationFingerprint(
+        systemPrompt: String,
+        userContext: String,
+        username: String,
+        codeowners: String,
+        isDirectCodeowner: Bool,
+        isRequestedReviewer: Bool
+    ) -> String {
+        // U+001F (unit separator) can't appear in the inputs, so fields can't bleed.
+        let input = [
+            isDirectCodeowner ? "1" : "0",
+            isRequestedReviewer ? "1" : "0",
+            username,
+            userContext,
+            codeowners,
+            systemPrompt
+        ].joined(separator: "\u{1f}")
+
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in input.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 16)
+    }
+
+    /// Whether a freshly-fetched PR can keep its previously-computed category
+    /// instead of being re-categorized. Safe only when the PR hasn't changed since
+    /// it was last categorized (`updatedAt` not advanced past `lastCategorizedAt`)
+    /// and every input outside `updatedAt` is identical (matching fingerprint).
+    /// Manual overrides are handled separately and never reuse via this path.
+    static func canReuseCategorization(
+        existing: PullRequest,
+        fresh: PullRequest,
+        currentFingerprint: String
+    ) -> Bool {
+        guard !existing.categoryOverridden,
+              let lastAt = existing.lastCategorizedAt,
+              fresh.updatedAt <= lastAt,
+              let storedFingerprint = existing.categorizationContextHash,
+              storedFingerprint == currentFingerprint
+        else { return false }
+        return true
+    }
+
     /// Perform a full refresh: fetch PRs, categorize new ones, fetch build status.
     func refresh() async throws -> RefreshResult {
         guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil, repoErrors: []) }
@@ -134,6 +189,15 @@ actor PollingService {
                     )
                 }
 
+                let fingerprint = Self.categorizationFingerprint(
+                    systemPrompt: llmSystemPrompt,
+                    userContext: settings.codeownerContext,
+                    username: settings.githubUsername,
+                    codeowners: codeownersCache[repo] ?? "",
+                    isDirectCodeowner: pr.isDirectCodeowner,
+                    isRequestedReviewer: pr.isRequestedReviewer
+                )
+
                 if let existing = existingByID[pr.id] {
                     pr.isFlagged = existing.isFlagged
                     if existing.categoryOverridden,
@@ -144,14 +208,24 @@ actor PollingService {
                         pr.categoryOverridden = true
                         pr.categoryReason = existing.categoryReason
                         pr.lastCategorizedAt = existing.lastCategorizedAt
+                        pr.categorizationContextHash = existing.categorizationContextHash
+                    } else if Self.canReuseCategorization(existing: existing, fresh: pr, currentFingerprint: fingerprint) {
+                        // Nothing affecting the verdict changed → reuse the stored
+                        // category and skip categorization (and its LLM call).
+                        pr.category = existing.category
+                        pr.categoryReason = existing.categoryReason
+                        pr.lastCategorizedAt = existing.lastCategorizedAt
+                        pr.categorizationContextHash = existing.categorizationContextHash
                     }
-                    // else: PR updated after override → re-categorize
+                    // else: new/updated PR or changed inputs → re-categorize below
                 }
 
                 let idx = prsForRepo.count
                 prsForRepo.append(pr)
 
-                if !pr.categoryOverridden {
+                // A reused or overridden PR carries a non-nil lastCategorizedAt;
+                // anything still nil needs (re)categorization.
+                if !pr.categoryOverridden && pr.lastCategorizedAt == nil {
                     needsCategorization.append((idx, pr))
                 }
             }
@@ -179,6 +253,14 @@ actor PollingService {
                     prsForRepo[prIdx].category = result.category
                     prsForRepo[prIdx].categoryReason = result.reason
                     prsForRepo[prIdx].lastCategorizedAt = Date()
+                    prsForRepo[prIdx].categorizationContextHash = Self.categorizationFingerprint(
+                        systemPrompt: llmSystemPrompt,
+                        userContext: userContext,
+                        username: username,
+                        codeowners: codeowners ?? "",
+                        isDirectCodeowner: prsForRepo[prIdx].isDirectCodeowner,
+                        isRequestedReviewer: prsForRepo[prIdx].isRequestedReviewer
+                    )
 
                     if idx < needsCategorization.count {
                         let (nextPrIdx, nextPr) = needsCategorization[idx]
@@ -220,6 +302,24 @@ actor PollingService {
                         var pr = refreshed
                         pr.isRequestedReviewer = true
                         pr.isFlagged = existing.isFlagged
+                        // Recompute the codeowner flag so the fingerprint and any
+                        // re-categorization see the current value.
+                        let codeowners = codeownersCache[existing.repoFullName].flatMap { $0.isEmpty ? nil : $0 }
+                        if let parser = parserCache[existing.repoFullName] {
+                            pr.isDirectCodeowner = parser.isDirectOwner(
+                                username: settings.githubUsername,
+                                files: pr.filesChanged
+                            )
+                        }
+                        let fingerprint = Self.categorizationFingerprint(
+                            systemPrompt: llmSystemPrompt,
+                            userContext: settings.codeownerContext,
+                            username: settings.githubUsername,
+                            codeowners: codeowners ?? "",
+                            isDirectCodeowner: pr.isDirectCodeowner,
+                            isRequestedReviewer: pr.isRequestedReviewer
+                        )
+
                         if existing.categoryOverridden,
                            let overriddenAt = existing.lastCategorizedAt,
                            pr.updatedAt <= overriddenAt {
@@ -227,16 +327,15 @@ actor PollingService {
                             pr.categoryOverridden = true
                             pr.categoryReason = existing.categoryReason
                             pr.lastCategorizedAt = existing.lastCategorizedAt
+                            pr.categorizationContextHash = existing.categorizationContextHash
+                        } else if Self.canReuseCategorization(existing: existing, fresh: pr, currentFingerprint: fingerprint) {
+                            // Unchanged since last categorization → reuse, skip the LLM.
+                            pr.category = existing.category
+                            pr.categoryReason = existing.categoryReason
+                            pr.lastCategorizedAt = existing.lastCategorizedAt
+                            pr.categorizationContextHash = existing.categorizationContextHash
                         } else {
                             // Re-categorize
-                            let codeowners = codeownersCache[existing.repoFullName].flatMap { $0.isEmpty ? nil : $0 }
-                            let parser: CodeownersParser? = parserCache[existing.repoFullName]
-                            if let parser {
-                                pr.isDirectCodeowner = parser.isDirectOwner(
-                                    username: settings.githubUsername,
-                                    files: pr.filesChanged
-                                )
-                            }
                             let result = await categorizationService.categorize(
                                 pr: pr, codeowners: codeowners, userContext: settings.codeownerContext,
                                 username: settings.githubUsername
@@ -244,6 +343,7 @@ actor PollingService {
                             pr.category = result.category
                             pr.categoryReason = result.reason
                             pr.lastCategorizedAt = Date()
+                            pr.categorizationContextHash = fingerprint
                         }
                         allPRs.append(pr)
                     }

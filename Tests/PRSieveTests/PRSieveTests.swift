@@ -1289,6 +1289,121 @@ func runAllTests() async {
         t.check(!freshNoDate.categoryOverridden, "override with nil lastCategorizedAt is not applied")
     }
 
+    // --- Categorization caching: fingerprint ---
+
+    do {
+        let base = PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: true
+        )
+
+        // Identical inputs → identical (and stable, non-empty) fingerprint.
+        let same = PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: true
+        )
+        t.check(!base.isEmpty, "fingerprint is non-empty")
+        t.checkEqual(base, same, "identical inputs produce identical fingerprints")
+
+        // Each input that can change the verdict changes the fingerprint.
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT v2", userContext: "I own checkout", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: true
+        ), "system prompt change alters fingerprint")
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own payments", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: true
+        ), "ownership context change alters fingerprint")
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "bob",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: true
+        ), "username change alters fingerprint")
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "alice",
+            codeowners: "*.kt @bob", isDirectCodeowner: false, isRequestedReviewer: true
+        ), "CODEOWNERS content change alters fingerprint")
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: true, isRequestedReviewer: true
+        ), "codeowner flag change alters fingerprint")
+        t.check(base != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "I own checkout", username: "alice",
+            codeowners: "*.swift @alice", isDirectCodeowner: false, isRequestedReviewer: false
+        ), "requested-reviewer flag change alters fingerprint")
+
+        // Field boundaries can't be forged by moving content across separators.
+        t.check(PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "a", username: "bc",
+            codeowners: "", isDirectCodeowner: false, isRequestedReviewer: true
+        ) != PollingService.categorizationFingerprint(
+            systemPrompt: "PROMPT", userContext: "ab", username: "c",
+            codeowners: "", isDirectCodeowner: false, isRequestedReviewer: true
+        ), "field boundaries are preserved (no separator collision)")
+    }
+
+    // --- Categorization caching: reuse decision ---
+
+    do {
+        let lastAt = Date()
+        let fp = "fingerprint-abc"
+
+        func cached(updatedAt: Date, overridden: Bool = false, hash: String? = fp, categorizedAt: Date? = lastAt) -> PullRequest {
+            var pr = makePR(updatedAt: updatedAt)
+            pr.category = .low
+            pr.categoryReason = "LLM said low"
+            pr.categoryOverridden = overridden
+            pr.lastCategorizedAt = categorizedAt
+            pr.categorizationContextHash = hash
+            return pr
+        }
+
+        // Reuse: unchanged PR, matching fingerprint, previously categorized.
+        let unchanged = cached(updatedAt: lastAt.addingTimeInterval(-3600))
+        let fresh = makePR(updatedAt: lastAt.addingTimeInterval(-3600))
+        t.check(
+            PollingService.canReuseCategorization(existing: unchanged, fresh: fresh, currentFingerprint: fp),
+            "reuse when PR unchanged and fingerprint matches"
+        )
+
+        // No reuse: PR updated after it was last categorized.
+        let updated = makePR(updatedAt: lastAt.addingTimeInterval(3600))
+        t.check(
+            !PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt.addingTimeInterval(-3600)), fresh: updated, currentFingerprint: fp),
+            "no reuse when PR updated after last categorization"
+        )
+
+        // No reuse: fingerprint changed (e.g. user edited ownership context).
+        t.check(
+            !PollingService.canReuseCategorization(existing: unchanged, fresh: fresh, currentFingerprint: "different"),
+            "no reuse when fingerprint differs"
+        )
+
+        // No reuse: never categorized (legacy / new PR).
+        t.check(
+            !PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt.addingTimeInterval(-3600), categorizedAt: nil), fresh: fresh, currentFingerprint: fp),
+            "no reuse when lastCategorizedAt is nil"
+        )
+
+        // No reuse: stored fingerprint missing (categorized before this field existed).
+        t.check(
+            !PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt.addingTimeInterval(-3600), hash: nil), fresh: fresh, currentFingerprint: fp),
+            "no reuse when stored fingerprint is nil (legacy data)"
+        )
+
+        // No reuse: overridden PRs are handled by the override path, not the cache.
+        t.check(
+            !PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt.addingTimeInterval(-3600), overridden: true), fresh: fresh, currentFingerprint: fp),
+            "no reuse for overridden PRs"
+        )
+
+        // Boundary: reuse holds when updatedAt exactly equals lastCategorizedAt.
+        let exact = makePR(updatedAt: lastAt)
+        t.check(
+            PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt), fresh: exact, currentFingerprint: fp),
+            "reuse when updatedAt == lastCategorizedAt"
+        )
+    }
+
     // --- LLMClient: API key is optional ---
 
     do {

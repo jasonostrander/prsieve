@@ -60,6 +60,13 @@ struct PullRequest: Identifiable, Codable, Sendable {
     var isFlagged: Bool
     var lastCategorizedAt: Date?
 
+    /// Fingerprint of the categorization inputs (system prompt, ownership context,
+    /// username, codeowner/reviewer flags) used the last time this PR was
+    /// categorized. Lets polling skip re-running categorization — and the LLM call
+    /// it implies — when nothing that could change the verdict has changed.
+    /// `nil` for PRs categorized before this field existed, forcing one recompute.
+    var categorizationContextHash: String?
+
     var age: TimeInterval {
         Date().timeIntervalSince(createdAt)
     }
