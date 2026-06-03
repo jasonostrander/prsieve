@@ -66,9 +66,39 @@ if [[ "$PUBLISH" -eq 1 ]]; then
     fi
 fi
 
-# Generate build info (git hash + build date), reset on exit
+# Generate the changelog entry BEFORE the expensive build, so a bad summary or
+# an abort at the review prompt costs nothing. The release agent (claude)
+# summarizes the commits since the previous tag; generate_changelog.sh falls
+# back to commit subjects if claude is unavailable. Override the whole thing by
+# exporting CHANGELOG_NOTES with your own markdown bullets.
+PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+NOTES_FILE="$(mktemp -t prsieve_notes)"
+if [[ -n "${CHANGELOG_NOTES:-}" ]]; then
+    printf '%s\n' "$CHANGELOG_NOTES" > "$NOTES_FILE"
+    echo "Using changelog notes from \$CHANGELOG_NOTES."
+else
+    echo "Summarizing changes since ${PREV_TAG:-the beginning} with the release agent..."
+    ./scripts/generate_changelog.sh "$PREV_TAG" > "$NOTES_FILE"
+fi
+echo
+echo "Changelog entry for v${VERSION}:"
+echo "------------------------------------------------------------"
+sed 's/^/  /' "$NOTES_FILE"
+echo "------------------------------------------------------------"
+if [[ "$PUBLISH" -eq 1 && -t 0 ]]; then
+    read -r -p "Press Enter to accept, 'e' to edit, or Ctrl-C to abort: " _ans
+    if [[ "${_ans:-}" == "e" ]]; then
+        "${EDITOR:-vi}" "$NOTES_FILE"
+        echo "Revised changelog entry:"
+        sed 's/^/  /' "$NOTES_FILE"
+    fi
+fi
+echo
+
+# Generate build info (git hash + build date). On exit, reset BuildInfo.swift
+# (regenerated every build, never committed) and clean up the temp notes file.
 ./scripts/generate_build_info.sh
-trap "git checkout -- Sources/PRSieve/BuildInfo.swift 2>/dev/null || true" EXIT
+trap 'git checkout -- Sources/PRSieve/BuildInfo.swift 2>/dev/null || true; rm -f "$NOTES_FILE" 2>/dev/null || true' EXIT
 
 # Build in release mode
 swift build -c release
@@ -180,6 +210,34 @@ if [[ -z "$EDSIG" || -z "$LENGTH" ]]; then
     exit 1
 fi
 
+# Prepend the new section to CHANGELOG.md (newest first, under the header).
+DATE_YMD=$(date -u +"%Y-%m-%d")
+ENTRY_FILE="$(mktemp -t prsieve_entry)"
+{
+    printf '## %s — %s\n' "$VERSION" "$DATE_YMD"
+    cat "$NOTES_FILE"
+    printf '\n'
+} > "$ENTRY_FILE"
+awk -v ef="$ENTRY_FILE" '
+    /^## / && !ins { while ((getline l < ef) > 0) print l; ins=1 }
+    { print }
+    END { if (!ins) while ((getline l < ef) > 0) print l }
+' CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+rm -f "$ENTRY_FILE"
+echo "Updated CHANGELOG.md (version $VERSION)"
+
+# Render the changelog bullets as HTML for Sparkle's "Check for Updates" dialog.
+# Strip the markdown bullet marker, HTML-escape the text, then wrap each line in
+# <li>. Sparkle's standard updater shows this <description> as the release notes.
+DESC_HTML=$(
+    printf '<ul>\n'
+    sed -E 's/^[[:space:]]*[-*][[:space:]]+//' "$NOTES_FILE" \
+        | sed '/^[[:space:]]*$/d' \
+        | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+        | sed 's#.*#                <li>&</li>#'
+    printf '            </ul>'
+)
+
 # Generate appcast.xml (overwrites; users always get pushed to the latest version)
 PUBDATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
 cat > appcast.xml <<EOF
@@ -196,6 +254,9 @@ cat > appcast.xml <<EOF
             <sparkle:version>${VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+${DESC_HTML}
+            ]]></description>
             <enclosure
                 url="${DOWNLOAD_URL}"
                 sparkle:edSignature="${EDSIG}"
@@ -208,7 +269,7 @@ EOF
 echo "Wrote appcast.xml (version $VERSION)"
 
 if [[ "$PUBLISH" -eq 1 ]]; then
-    git add appcast.xml
+    git add appcast.xml CHANGELOG.md
     git commit -m "Release v${VERSION}"
     git tag "$TAG"
     # Push to main explicitly: this script may run from a worktree branch, but
@@ -218,13 +279,13 @@ if [[ "$PUBLISH" -eq 1 ]]; then
     gh release create "$TAG" "$ZIP_PATH" \
         --repo "$GITHUB_REPO" \
         --title "v${VERSION}" \
-        --notes "PRSieve ${VERSION}"
+        --notes-file "$NOTES_FILE"
     echo ""
     echo "Released v${VERSION}: ${DOWNLOAD_URL}"
 else
     echo ""
     echo "Built (not published): $ZIP_PATH"
-    echo "appcast.xml regenerated locally."
+    echo "appcast.xml and CHANGELOG.md regenerated locally (uncommitted)."
 fi
 
 # Open the folder containing the zip
