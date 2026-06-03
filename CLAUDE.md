@@ -104,7 +104,7 @@ Merged priority PRs remain visible for 3 days if you haven't reviewed them (conf
 Configured via the popover footer or right-click > Settings:
 - **GitHub**: username, personal access token, repos (owner/repo format)
 - **Prompt**: Free-text description of what code you own (used in LLM prompt)
-- **Polling interval**: 1-15 minutes
+- **Polling interval**: 15 minutes, 30 minutes (default), 1 hour, or 2 hours
 - **Hide draft PRs**: Toggle (default on)
 - **Keep unreviewed priority PRs visible for 3 days after merge**: Toggle (default on)
 - **Notify when priority PRs pass CI**: Toggle (default on)

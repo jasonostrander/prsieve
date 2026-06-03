@@ -40,10 +40,24 @@ actor PersistenceService {
 
     // MARK: - Settings
 
+    /// Reads just the schema version so we can tell whether a loaded file needs
+    /// its migrated form written back. Files predating the field decode as nil.
+    private struct SchemaProbe: Decodable {
+        let schemaVersion: Int?
+    }
+
     func loadSettings() -> AppSettings {
         guard let data = try? Data(contentsOf: settingsURL),
               let settings = try? decoder.decode(AppSettings.self, from: data) else {
             return .default
+        }
+        // If the file predates the current schema, `AppSettings`'s decoder has
+        // already applied any one-time migrations (e.g. forcing the new default
+        // polling interval). Persist the migrated form now so the migration runs
+        // exactly once instead of on every launch until the user changes a setting.
+        let onDiskVersion = (try? decoder.decode(SchemaProbe.self, from: data))?.schemaVersion ?? 0
+        if onDiskVersion < AppSettings.currentSchemaVersion {
+            try? saveSettings(settings)
         }
         return settings
     }

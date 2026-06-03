@@ -596,6 +596,42 @@ func runAllTests() async {
     do {
         let defaults = AppSettings.default
         t.checkEqual(defaults.hideDraftPRs, true, "hideDraftPRs defaults to true")
+        t.checkEqual(defaults.pollingIntervalSeconds, 1800, "pollingIntervalSeconds defaults to 30 minutes")
+        t.checkEqual(defaults.schemaVersion, AppSettings.currentSchemaVersion, "fresh settings carry the current schema version")
+    }
+
+    do {
+        // Missing pollingIntervalSeconds falls back to the 30-minute default.
+        let json = #"{"githubUsername":"","repos":[]}"#
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.pollingIntervalSeconds, 1800, "pollingIntervalSeconds defaults to 1800 when missing from JSON")
+    }
+
+    do {
+        // v1 migration: any file written before `schemaVersion` existed (so it
+        // decodes as 0) gets forced to the new 30-minute default, regardless of
+        // what the user had — including the still-valid 15-minute option.
+        for legacy in [60, 120, 300, 600, 900, 3600] {
+            let json = "{\"githubUsername\":\"\",\"repos\":[],\"pollingIntervalSeconds\":\(legacy)}"
+            let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+            t.checkEqual(decoded.pollingIntervalSeconds, 1800, "pre-schema file with \(legacy)s is migrated to 30 minutes")
+            t.checkEqual(decoded.schemaVersion, AppSettings.currentSchemaVersion, "migration stamps the current schema version")
+        }
+    }
+
+    do {
+        // A current-schema file keeps the user's chosen valid interval untouched.
+        let json = "{\"githubUsername\":\"\",\"repos\":[],\"pollingIntervalSeconds\":3600,\"schemaVersion\":\(AppSettings.currentSchemaVersion)}"
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.pollingIntervalSeconds, 3600, "current-schema file preserves a valid chosen interval")
+    }
+
+    do {
+        // A current-schema file with a value outside the offered options (e.g.
+        // hand-edited) falls back to the default rather than rendering blank.
+        let json = "{\"githubUsername\":\"\",\"repos\":[],\"pollingIntervalSeconds\":12345,\"schemaVersion\":\(AppSettings.currentSchemaVersion)}"
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.pollingIntervalSeconds, 1800, "current-schema file with an invalid interval falls back to 30 minutes")
     }
 
     do {
@@ -1477,6 +1513,62 @@ func runAllTests() async {
             t.checkEqual(loaded2.llmModel, "", "empty llmModel persists (means use bundle default)")
         } else {
             t.check(false, "llmModel persistence: failed to create PersistenceService")
+        }
+    }
+
+    // --- PersistenceService: loading a pre-schema file persists the migration ---
+
+    do {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-migrate-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Simulate a settings.json written by a build predating `schemaVersion`,
+        // with the retired 5-minute polling interval.
+        let legacy = #"{"githubUsername":"alice","repos":[],"pollingIntervalSeconds":300}"#
+        let settingsURL = dir.appendingPathComponent("settings.json")
+        try? legacy.data(using: .utf8)!.write(to: settingsURL)
+
+        if let persistence = try? PersistenceService(directory: dir) {
+            let loaded = await persistence.loadSettings()
+            t.checkEqual(loaded.pollingIntervalSeconds, 1800, "loading a pre-schema file migrates the interval to 30 minutes")
+
+            // The migrated form must be written back so the migration is one-time:
+            // the raw file on disk should now carry the current schema version and
+            // the new interval — not the original 300.
+            let raw = (try? Data(contentsOf: settingsURL)).flatMap {
+                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            t.checkEqual(raw?["schemaVersion"] as? Int, AppSettings.currentSchemaVersion, "migration is persisted with the current schema version")
+            t.checkEqual(raw?["pollingIntervalSeconds"] as? Int, 1800, "migrated interval is persisted to disk")
+        } else {
+            t.check(false, "migration persistence: failed to create PersistenceService")
+        }
+    }
+
+    // --- PersistenceService: loading a current-schema file does not rewrite it ---
+
+    do {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-nomigrate-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // A current-schema file with a valid, non-default interval must survive load
+        // untouched (the migration must not clobber a user's deliberate choice).
+        let current = "{\"githubUsername\":\"alice\",\"repos\":[],\"pollingIntervalSeconds\":3600,\"schemaVersion\":\(AppSettings.currentSchemaVersion)}"
+        let settingsURL = dir.appendingPathComponent("settings.json")
+        try? current.data(using: .utf8)!.write(to: settingsURL)
+
+        if let persistence = try? PersistenceService(directory: dir) {
+            let loaded = await persistence.loadSettings()
+            t.checkEqual(loaded.pollingIntervalSeconds, 3600, "current-schema file keeps the user's chosen interval on load")
+
+            // The file is compact JSON; saveSettings would rewrite it pretty-printed.
+            // An unchanged byte-for-byte file proves load did not rewrite it.
+            let onDisk = try? String(contentsOf: settingsURL, encoding: .utf8)
+            t.checkEqual(onDisk, current, "current-schema file is not rewritten on load")
+        } else {
+            t.check(false, "no-migration persistence: failed to create PersistenceService")
         }
     }
 
