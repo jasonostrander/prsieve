@@ -33,7 +33,11 @@ actor GitHubClient {
 
     // MARK: - Fetch PRs requesting review from user
 
-    func fetchReviewRequests(repo: String, username: String) async throws -> [PullRequest] {
+    /// Lightweight search for PRs requesting the user's review (directly + via team),
+    /// deduped by number. Returns only the search items — which already carry each PR's
+    /// `updatedAt` — so the caller can diff against stored PRs and skip the expensive
+    /// detail fetch for ones that haven't changed.
+    func fetchReviewRequestItems(repo: String, username: String) async throws -> [GitHubSearchItem] {
         let searchQuery = "repo:\(repo) is:pr is:open review-requested:\(username)"
         let teamQuery = "repo:\(repo) is:pr is:open user-review-requested:\(username)"
 
@@ -41,7 +45,7 @@ actor GitHubClient {
         async let items1 = searchItems(query: searchQuery)
         async let items2 = searchItems(query: teamQuery)
 
-        // Dedup by PR number before fetching details (avoids duplicate API calls)
+        // Dedup by PR number
         var seen = Set<Int>()
         var uniqueItems: [GitHubSearchItem] = []
         for item in try await items1 + items2 {
@@ -49,9 +53,13 @@ actor GitHubClient {
                 uniqueItems.append(item)
             }
         }
+        return uniqueItems
+    }
 
-        // Fetch PR details concurrently (bounded to 5 at a time)
-        return try await fetchDetailsConcurrently(items: uniqueItems, username: username)
+    /// Lightweight search for open PRs the user has previously reviewed/commented on.
+    func fetchReviewedItems(repo: String, username: String) async throws -> [GitHubSearchItem] {
+        let query = "repo:\(repo) is:pr is:open reviewed-by:\(username)"
+        return try await searchItems(query: query)
     }
 
     private func searchItems(query: String) async throws -> [GitHubSearchItem] {
@@ -67,7 +75,8 @@ actor GitHubClient {
         return searchResult.items
     }
 
-    private func fetchDetailsConcurrently(items: [GitHubSearchItem], username: String) async throws -> [PullRequest] {
+    /// Fetch full PR details for the given search items, bounded to 5 concurrent.
+    func fetchDetails(for items: [GitHubSearchItem], username: String) async throws -> [PullRequest] {
         try await withThrowingTaskGroup(of: PullRequest?.self) { group in
             let maxConcurrency = 5
             var results: [PullRequest] = []
@@ -163,6 +172,7 @@ actor GitHubClient {
             labels: ghPR.labels.map(\.name),
             headBranch: ghPR.head.ref,
             baseBranch: ghPR.base.ref,
+            headSHA: ghPR.head.sha,
             body: String(ghPR.body?.prefix(1000) ?? ""),
             filesChanged: files.map(\.filename),
             reviewers: reviewers,
@@ -221,14 +231,6 @@ actor GitHubClient {
         } catch {
             return .unknown
         }
-    }
-
-    // MARK: - Fetch open PRs the user has previously reviewed/commented on
-
-    func fetchReviewedByUser(repo: String, username: String) async throws -> [PullRequest] {
-        let query = "repo:\(repo) is:pr is:open reviewed-by:\(username)"
-        let items = try await searchItems(query: query)
-        return try await fetchDetailsConcurrently(items: items, username: username)
     }
 
     // MARK: - Lightweight PR state check
@@ -419,6 +421,7 @@ struct GitHubSearchResult: Decodable, Sendable {
 struct GitHubSearchItem: Decodable, Sendable {
     let number: Int
     let repositoryUrl: String
+    let updatedAt: Date
 
     var repoFullName: String {
         // repositoryUrl is like "https://api.github.com/repos/owner/repo"

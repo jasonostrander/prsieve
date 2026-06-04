@@ -73,7 +73,9 @@ func makePR(
     isDirectCodeowner: Bool = false,
     isSoleHumanReviewer: Bool = false,
     updatedAt: Date = Date(),
-    baseBranch: String = "feature"
+    baseBranch: String = "feature",
+    buildStatus: BuildStatus? = nil,
+    headSHA: String? = "deadbeef"
 ) -> PullRequest {
     PullRequest(
         repoFullName: "owner/repo",
@@ -88,6 +90,7 @@ func makePR(
         labels: labels,
         headBranch: "feature",
         baseBranch: baseBranch,
+        headSHA: headSHA,
         body: "Some description",
         filesChanged: filesChanged,
         reviewers: [],
@@ -99,7 +102,7 @@ func makePR(
         category: .low,
         categoryOverridden: false,
         categoryReason: "",
-        buildStatus: nil,
+        buildStatus: buildStatus,
         isMerged: false,
         isClosed: false,
         isFlagged: false,
@@ -1402,6 +1405,122 @@ func runAllTests() async {
             PollingService.canReuseCategorization(existing: cached(updatedAt: lastAt), fresh: exact, currentFingerprint: fp),
             "reuse when updatedAt == lastCategorizedAt"
         )
+    }
+
+    // --- Selective detail fetch: needsStatusRefresh ---
+
+    do {
+        t.check(!PollingService.needsStatusRefresh(.passed), "passed CI is settled — no refresh")
+        t.check(PollingService.needsStatusRefresh(.failed), "failed CI may still flip to passed on re-run")
+        t.check(PollingService.needsStatusRefresh(.running), "running CI needs refresh")
+        t.check(PollingService.needsStatusRefresh(.unknown), "unknown CI needs refresh")
+        t.check(PollingService.needsStatusRefresh(nil), "missing CI needs refresh")
+    }
+
+    // --- Selective detail fetch: fetchPlan ---
+
+    do {
+        let stored = Date()
+
+        // New PR (nothing stored) → full fetch.
+        t.checkEqual(
+            PollingService.fetchPlan(existing: nil, currentUpdatedAt: stored),
+            .fullFetch,
+            "no stored PR → full fetch"
+        )
+
+        // Changed since last sync (search updatedAt newer) → full fetch, even if CI settled.
+        t.checkEqual(
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: .passed),
+                currentUpdatedAt: stored.addingTimeInterval(60)
+            ),
+            .fullFetch,
+            "newer updatedAt → full fetch"
+        )
+
+        // Unchanged + passed CI → reuse, zero calls (only passed is settled).
+        t.checkEqual(
+            PollingService.fetchPlan(existing: makePR(updatedAt: stored, buildStatus: .passed), currentUpdatedAt: stored),
+            .reuse,
+            "unchanged + passed CI → reuse"
+        )
+
+        // Unchanged + failed CI + SHA → status-only refresh (could flip to passed on re-run).
+        t.checkEqual(
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: .failed, headSHA: "abc"),
+                currentUpdatedAt: stored
+            ),
+            .reuseRefreshingStatus,
+            "unchanged + failed CI + SHA → status-only refresh"
+        )
+
+        // Unchanged + in-flight CI + stored SHA → status-only refresh.
+        t.checkEqual(
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: .running, headSHA: "abc"),
+                currentUpdatedAt: stored
+            ),
+            .reuseRefreshingStatus,
+            "unchanged + running CI + SHA → status-only refresh"
+        )
+        t.checkEqual(
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: nil, headSHA: "abc"),
+                currentUpdatedAt: stored
+            ),
+            .reuseRefreshingStatus,
+            "unchanged + unknown CI + SHA → status-only refresh"
+        )
+
+        // Unchanged + in-flight CI but no stored SHA (legacy data) → full fetch to learn it.
+        t.checkEqual(
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: .running, headSHA: nil),
+                currentUpdatedAt: stored
+            ),
+            .fullFetch,
+            "unchanged + running CI + no SHA → full fetch"
+        )
+
+        // Boundary: equal updatedAt counts as unchanged.
+        t.checkEqual(
+            PollingService.fetchPlan(existing: makePR(updatedAt: stored, buildStatus: .passed), currentUpdatedAt: stored),
+            .reuse,
+            "updatedAt == stored → unchanged → reuse"
+        )
+    }
+
+    // --- Selective detail fetch: search items carry updatedAt ---
+
+    do {
+        let json = """
+        {
+          "total_count": 1,
+          "items": [
+            {
+              "number": 42,
+              "repository_url": "https://api.github.com/repos/owner/repo",
+              "updated_at": "2026-01-15T10:30:00Z"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let result = try decoder.decode(GitHubSearchResult.self, from: json)
+            t.checkEqual(result.items.count, 1, "decodes one search item")
+            t.checkEqual(result.items.first?.number, 42, "decodes item number")
+            t.checkEqual(result.items.first?.repoFullName, "owner/repo", "derives repoFullName from repository_url")
+            let expected = ISO8601DateFormatter().date(from: "2026-01-15T10:30:00Z")
+            t.checkEqual(result.items.first?.updatedAt, expected, "decodes item updatedAt from updated_at")
+        } catch {
+            t.check(false, "search item decode failed: \(error)")
+        }
     }
 
     // --- LLMClient: API key is optional ---

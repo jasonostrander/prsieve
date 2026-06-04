@@ -42,6 +42,11 @@ struct PullRequest: Identifiable, Codable, Sendable {
     let labels: [String]
     let headBranch: String
     let baseBranch: String
+    /// HEAD commit SHA. Lets polling refresh CI status on its own (one
+    /// `/commits/{sha}/status` call) without a full detail fetch when a PR's
+    /// `updatedAt` is unchanged but its CI may still be in flight. `nil` for PRs
+    /// persisted before this field existed (forces a one-time full re-fetch).
+    let headSHA: String?
     let body: String?
     let filesChanged: [String]
 

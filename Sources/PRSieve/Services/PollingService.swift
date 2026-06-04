@@ -93,6 +93,86 @@ actor PollingService {
         return true
     }
 
+    // MARK: - Selective detail fetching
+
+    /// Whether a PR's stored CI status could still change and so warrants a refresh.
+    /// A PR's `updatedAt` does *not* move when CI transitions, so we can't rely on it
+    /// for build status. Only `.passed` is treated as settled — a new commit (which
+    /// *would* bump `updatedAt` and trigger a full fetch) is the only thing that
+    /// un-passes it. `.failed`/`.running`/`.unknown`/nil can all still flip to passed
+    /// via a CI re-run on the same commit (no `updatedAt` change), and catching that
+    /// "went green" event is the whole point of the app — so refresh those.
+    static func needsStatusRefresh(_ status: BuildStatus?) -> Bool {
+        status != .passed
+    }
+
+    /// How to obtain a PR's current state, given its `updatedAt` from search and what
+    /// we already have stored. The search result's `updatedAt` is authoritative for
+    /// PR-resource changes (commits, comments, reviews, labels…); CI status is the one
+    /// thing it misses, hence the status-only refresh case.
+    enum FetchPlan: Equatable {
+        case fullFetch              // new PR, or changed since last sync → 7 API calls
+        case reuse                  // unchanged + CI settled → 0 API calls
+        case reuseRefreshingStatus  // unchanged + CI in flight → 1 API call
+    }
+
+    static func fetchPlan(existing: PullRequest?, currentUpdatedAt: Date) -> FetchPlan {
+        guard let existing, currentUpdatedAt <= existing.updatedAt else { return .fullFetch }
+        guard needsStatusRefresh(existing.buildStatus) else { return .reuse }
+        // A status-only refresh needs the head SHA; PRs persisted before that field
+        // existed lack it, so fall back to a full fetch (which repopulates it).
+        return existing.headSHA == nil ? .fullFetch : .reuseRefreshingStatus
+    }
+
+    /// A stored PR reused without re-fetching, with its categorization-decision fields
+    /// reset to the same state a freshly-fetched PR has. This lets the shared
+    /// override/cache gate below re-derive the verdict uniformly — restoring it from the
+    /// stored copy when nothing relevant changed, or re-running the LLM if (say) the
+    /// ownership prompt changed. Data fields (files, reviewers, build status…) are kept.
+    private func reusableCopy(of existing: PullRequest) -> PullRequest {
+        var pr = existing
+        pr.category = .low
+        pr.categoryReason = ""
+        pr.categoryOverridden = false
+        pr.lastCategorizedAt = nil
+        pr.categorizationContextHash = nil
+        return pr
+    }
+
+    /// Refresh just the CI status for reused PRs whose build is still in flight —
+    /// one `/commits/{sha}/status` call each, bounded to 5 concurrent.
+    private func refreshStatuses(_ prs: [PullRequest]) async -> [PullRequest] {
+        guard !prs.isEmpty else { return [] }
+        let client = githubClient
+        return await withTaskGroup(of: (Int, BuildStatus?).self) { group in
+            let maxConcurrency = 5
+            var results = prs
+            var index = 0
+
+            func addTask(_ i: Int) {
+                let pr = prs[i]
+                group.addTask {
+                    guard let sha = pr.headSHA else { return (i, pr.buildStatus) }
+                    let status = try? await client.fetchCombinedStatus(repo: pr.repoFullName, ref: sha)
+                    return (i, status ?? pr.buildStatus)
+                }
+            }
+
+            for _ in 0..<min(maxConcurrency, prs.count) {
+                addTask(index)
+                index += 1
+            }
+            for await (i, status) in group {
+                results[i].buildStatus = status
+                if index < prs.count {
+                    addTask(index)
+                    index += 1
+                }
+            }
+            return results
+        }
+    }
+
     /// Perform a full refresh: fetch PRs, categorize new ones, fetch build status.
     func refresh() async throws -> RefreshResult {
         guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil, repoErrors: []) }
@@ -132,27 +212,66 @@ actor PollingService {
             // (and disappeared-PR recovery below) still need to run.
             let mergedPRs: [(pr: PullRequest, isRequested: Bool)]
             do {
-                async let requestedPRs = githubClient.fetchReviewRequests(
+                // Lightweight search first: numbers + updatedAt for both lists, in parallel.
+                async let requestedItemsTask = githubClient.fetchReviewRequestItems(
                     repo: repo,
                     username: settings.githubUsername
                 )
-                async let reviewedPRs = githubClient.fetchReviewedByUser(
+                async let reviewedItemsTask = githubClient.fetchReviewedItems(
                     repo: repo,
                     username: settings.githubUsername
                 )
 
-                // Merge: review-requested PRs take precedence; reviewed-by fills in the rest
+                // Merge items: review-requested takes precedence; reviewed-by fills the rest.
+                var requestedFlagByID: [String: Bool] = [:]
+                var orderedItems: [GitHubSearchItem] = []
                 var seenIDs = Set<String>()
-                var merged: [(pr: PullRequest, isRequested: Bool)] = []
-                for pr in (try await requestedPRs) {
-                    if seenIDs.insert(pr.id).inserted {
-                        merged.append((pr, true))
+                for item in (try await requestedItemsTask) {
+                    let id = "\(item.repoFullName)#\(item.number)"
+                    if seenIDs.insert(id).inserted {
+                        orderedItems.append(item)
+                        requestedFlagByID[id] = true
                     }
                 }
-                for pr in (try await reviewedPRs) {
-                    if seenIDs.insert(pr.id).inserted {
-                        merged.append((pr, false))
+                for item in (try await reviewedItemsTask) {
+                    let id = "\(item.repoFullName)#\(item.number)"
+                    if seenIDs.insert(id).inserted {
+                        orderedItems.append(item)
+                        requestedFlagByID[id] = false
                     }
+                }
+
+                // Diff each item's updatedAt against what we have stored to decide whether
+                // to reuse it (skipping the 7-call detail fetch), refresh only its CI, or
+                // fully re-fetch. This is the bulk of the sync-time win.
+                var reuseExisting: [PullRequest] = []
+                var statusRefresh: [PullRequest] = []
+                var itemsToFetch: [GitHubSearchItem] = []
+                for item in orderedItems {
+                    let id = "\(item.repoFullName)#\(item.number)"
+                    let existing = existingByID[id]
+                    switch Self.fetchPlan(existing: existing, currentUpdatedAt: item.updatedAt) {
+                    case .reuse:
+                        if let existing { reuseExisting.append(existing) }
+                    case .reuseRefreshingStatus:
+                        if let existing { statusRefresh.append(existing) }
+                    case .fullFetch:
+                        itemsToFetch.append(item)
+                    }
+                }
+
+                let refreshed = await refreshStatuses(statusRefresh)
+                let fetched = try await githubClient.fetchDetails(
+                    for: itemsToFetch,
+                    username: settings.githubUsername
+                )
+
+                var merged: [(pr: PullRequest, isRequested: Bool)] = []
+                for pr in reuseExisting + refreshed {
+                    merged.append((reusableCopy(of: pr), requestedFlagByID[pr.id] ?? false))
+                }
+                for pr in fetched {
+                    merged.append((pr, requestedFlagByID[pr.id] ?? false))
                 }
                 mergedPRs = merged
             } catch {
