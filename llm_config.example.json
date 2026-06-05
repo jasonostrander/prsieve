@@ -1,5 +1,6 @@
 {
-  "endpoint": "https://api.openai.com/v1",
-  "token": "sk-...",
+  "_comment": "endpoint defaults to the project's Instacart AI gateway, which authenticates requests itself — leave token empty for it (an empty token is correct). Set token only when using a provider that needs a bearer key, e.g. OpenAI at https://api.openai.com/v1. The _comment key is ignored by the loader.",
+  "endpoint": "https://aigateway.instacart.tools/proxy/prsieve/openai/v1",
+  "token": "",
   "model": "gpt-4o-mini"
 }

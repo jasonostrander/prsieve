@@ -674,6 +674,17 @@ func runAllTests() async {
         t.checkEqual(decoded.model, "gpt-4o-mini", "config model decoded")
     }
 
+    do {
+        // AI gateway config shape (mirrors llm_config.example.json): empty token is
+        // valid, and an unknown `_comment` key is ignored by the loader. This is the
+        // contract the example file relies on to carry an inline doc comment.
+        let json = #"{"_comment":"docs go here","endpoint":"https://aigateway.instacart.tools/proxy/prsieve/openai/v1","token":"","model":"gpt-4o-mini"}"#
+        let decoded = try! JSONDecoder().decode(LLMConfig.self, from: json.data(using: .utf8)!)
+        t.checkEqual(decoded.endpoint, "https://aigateway.instacart.tools/proxy/prsieve/openai/v1", "gateway endpoint decoded")
+        t.checkEqual(decoded.apiKey, "", "empty token decodes (gateway needs no bearer key)")
+        t.checkEqual(decoded.model, "gpt-4o-mini", "config model decoded with unknown key present")
+    }
+
     // --- Priority + CI indicator logic ---
     // Status bar icon highlights only when a priority PR has passing CI
 

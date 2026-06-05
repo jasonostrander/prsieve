@@ -47,7 +47,7 @@ elif [[ -f "${MAIN_WORKTREE}/llm_config.json" ]]; then
   echo "note: using llm_config.json from main worktree (${MAIN_WORKTREE})"
   LLM_SRC="${MAIN_WORKTREE}/llm_config.json"
 elif [[ -f llm_config.example.json ]]; then
-  echo "warning: llm_config.json not found, bundling llm_config.example.json (LLM will be disabled until token is set)"
+  echo "warning: llm_config.json not found, bundling llm_config.example.json (defaults to the Instacart AI gateway, which needs no token; copy to llm_config.json to customize)"
   LLM_SRC="llm_config.example.json"
 fi
 if [[ -n "$LLM_SRC" ]]; then
