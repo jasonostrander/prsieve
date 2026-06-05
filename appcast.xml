@@ -6,15 +6,22 @@
         <description>PRSieve updates feed</description>
         <language>en</language>
         <item>
-            <title>Version 0.9.3</title>
-            <pubDate>Wed, 27 May 2026 16:54:47 +0000</pubDate>
-            <sparkle:version>0.9.3</sparkle:version>
-            <sparkle:shortVersionString>0.9.3</sparkle:shortVersionString>
+            <title>Version 0.9.4</title>
+            <pubDate>Fri, 05 Jun 2026 19:30:40 +0000</pubDate>
+            <sparkle:version>0.9.4</sparkle:version>
+            <sparkle:shortVersionString>0.9.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+<ul>
+                <li>Faster refreshes — unchanged PRs skip detail fetches and redundant AI calls</li>
+                <li>Priority now requires an explicit match to your ownership areas, cutting false positives</li>
+                <li>Default polling interval is now 30 minutes</li>
+            </ul>
+            ]]></description>
             <enclosure
-                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.3/PRSieve.zip"
-                sparkle:edSignature="SbgZAvOE7S9DG/S8vaI6oqj0QPDY99FmhgAVPxrhqItdLqsYRa5Hw4OwqjHLjJ+XXcgjT6eS9t8wgNjP8lePAg=="
-                length="2514130"
+                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.4/PRSieve.zip"
+                sparkle:edSignature="3hqICvkF5+Q42pijzuTTX6oLO3Dv308XCWo7CQ3qBxDJb6grgpLXSTigc/nxvafSmmVW7pDwAtSQAHpBYdhJDQ=="
+                length="2532168"
                 type="application/octet-stream" />
         </item>
     </channel>

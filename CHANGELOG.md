@@ -5,6 +5,11 @@ Claude-generated summary of the major changes in that release, produced by
 `release.sh` (see `RELEASING.md`). The latest entry is also shown in the in-app
 **Check for Updates…** dialog via the Sparkle appcast.
 
+## 0.9.4 — 2026-06-05
+- Faster refreshes — unchanged PRs skip detail fetches and redundant AI calls
+- Priority now requires an explicit match to your ownership areas, cutting false positives
+- Default polling interval is now 30 minutes
+
 ## 0.9.3 — 2026-05-27
 - Better triage of PRs that mix code you own with code you don't (now judged file-by-file)
 
