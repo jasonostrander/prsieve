@@ -1418,16 +1418,6 @@ func runAllTests() async {
         )
     }
 
-    // --- Selective detail fetch: needsStatusRefresh ---
-
-    do {
-        t.check(!PollingService.needsStatusRefresh(.passed), "passed CI is settled — no refresh")
-        t.check(PollingService.needsStatusRefresh(.failed), "failed CI may still flip to passed on re-run")
-        t.check(PollingService.needsStatusRefresh(.running), "running CI needs refresh")
-        t.check(PollingService.needsStatusRefresh(.unknown), "unknown CI needs refresh")
-        t.check(PollingService.needsStatusRefresh(nil), "missing CI needs refresh")
-    }
-
     // --- Selective detail fetch: fetchPlan ---
 
     do {
@@ -1440,7 +1430,7 @@ func runAllTests() async {
             "no stored PR → full fetch"
         )
 
-        // Changed since last sync (search updatedAt newer) → full fetch, even if CI settled.
+        // Changed since last sync (search updatedAt newer) → full fetch.
         t.checkEqual(
             PollingService.fetchPlan(
                 existing: makePR(updatedAt: stored, buildStatus: .passed),
@@ -1450,56 +1440,46 @@ func runAllTests() async {
             "newer updatedAt → full fetch"
         )
 
-        // Unchanged + passed CI → reuse, zero calls (only passed is settled).
-        t.checkEqual(
-            PollingService.fetchPlan(existing: makePR(updatedAt: stored, buildStatus: .passed), currentUpdatedAt: stored),
-            .reuse,
-            "unchanged + passed CI → reuse"
-        )
-
-        // Unchanged + failed CI + SHA → status-only refresh (could flip to passed on re-run).
-        t.checkEqual(
-            PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .failed, headSHA: "abc"),
-                currentUpdatedAt: stored
-            ),
-            .reuseRefreshingStatus,
-            "unchanged + failed CI + SHA → status-only refresh"
-        )
-
-        // Unchanged + in-flight CI + stored SHA → status-only refresh.
-        t.checkEqual(
-            PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .running, headSHA: "abc"),
-                currentUpdatedAt: stored
-            ),
-            .reuseRefreshingStatus,
-            "unchanged + running CI + SHA → status-only refresh"
-        )
+        // Unchanged → always re-check CI (1 call), regardless of cached status. A
+        // previously-green build can flip to red on the same commit (e.g. a Buildkite
+        // re-run) without bumping updatedAt, so passed is no longer treated as settled.
+        for status in [BuildStatus.passed, .failed, .running, .unknown] {
+            t.checkEqual(
+                PollingService.fetchPlan(
+                    existing: makePR(updatedAt: stored, buildStatus: status, headSHA: "abc"),
+                    currentUpdatedAt: stored
+                ),
+                .reuseRefreshingStatus,
+                "unchanged + \(status) CI + SHA → status-only refresh"
+            )
+        }
         t.checkEqual(
             PollingService.fetchPlan(
                 existing: makePR(updatedAt: stored, buildStatus: nil, headSHA: "abc"),
                 currentUpdatedAt: stored
             ),
             .reuseRefreshingStatus,
-            "unchanged + unknown CI + SHA → status-only refresh"
+            "unchanged + missing CI + SHA → status-only refresh"
         )
 
-        // Unchanged + in-flight CI but no stored SHA (legacy data) → full fetch to learn it.
+        // Unchanged but no stored SHA (legacy data) → full fetch to learn it.
         t.checkEqual(
             PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .running, headSHA: nil),
+                existing: makePR(updatedAt: stored, buildStatus: .passed, headSHA: nil),
                 currentUpdatedAt: stored
             ),
             .fullFetch,
-            "unchanged + running CI + no SHA → full fetch"
+            "unchanged + no SHA → full fetch"
         )
 
-        // Boundary: equal updatedAt counts as unchanged.
+        // Boundary: equal updatedAt counts as unchanged → status-only refresh.
         t.checkEqual(
-            PollingService.fetchPlan(existing: makePR(updatedAt: stored, buildStatus: .passed), currentUpdatedAt: stored),
-            .reuse,
-            "updatedAt == stored → unchanged → reuse"
+            PollingService.fetchPlan(
+                existing: makePR(updatedAt: stored, buildStatus: .passed, headSHA: "abc"),
+                currentUpdatedAt: stored
+            ),
+            .reuseRefreshingStatus,
+            "updatedAt == stored → unchanged → status-only refresh"
         )
     }
 

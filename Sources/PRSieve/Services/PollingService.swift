@@ -95,32 +95,25 @@ actor PollingService {
 
     // MARK: - Selective detail fetching
 
-    /// Whether a PR's stored CI status could still change and so warrants a refresh.
-    /// A PR's `updatedAt` does *not* move when CI transitions, so we can't rely on it
-    /// for build status. Only `.passed` is treated as settled — a new commit (which
-    /// *would* bump `updatedAt` and trigger a full fetch) is the only thing that
-    /// un-passes it. `.failed`/`.running`/`.unknown`/nil can all still flip to passed
-    /// via a CI re-run on the same commit (no `updatedAt` change), and catching that
-    /// "went green" event is the whole point of the app — so refresh those.
-    static func needsStatusRefresh(_ status: BuildStatus?) -> Bool {
-        status != .passed
-    }
-
     /// How to obtain a PR's current state, given its `updatedAt` from search and what
     /// we already have stored. The search result's `updatedAt` is authoritative for
     /// PR-resource changes (commits, comments, reviews, labels…); CI status is the one
     /// thing it misses, hence the status-only refresh case.
     enum FetchPlan: Equatable {
         case fullFetch              // new PR, or changed since last sync → 7 API calls
-        case reuse                  // unchanged + CI settled → 0 API calls
-        case reuseRefreshingStatus  // unchanged + CI in flight → 1 API call
+        case reuseRefreshingStatus  // unchanged → reuse details, refresh CI → 1 API call
     }
 
+    /// Decide how to refresh a PR. A newer `updatedAt` (or a PR we've never seen) means
+    /// its resources changed → full fetch. Otherwise the PR's resources are unchanged,
+    /// but its CI/commit status still can't be trusted from cache: status attaches to the
+    /// commit SHA and changes *without* bumping `updatedAt`, so a re-run on the same
+    /// commit can flip a previously-green check to red (or red to green) and we'd never
+    /// see it. So we always re-check CI for an unchanged PR via a single
+    /// `/commits/{sha}/status` call. That needs the head SHA; PRs persisted before that
+    /// field existed lack it, so they fall back to a full fetch (which repopulates it).
     static func fetchPlan(existing: PullRequest?, currentUpdatedAt: Date) -> FetchPlan {
         guard let existing, currentUpdatedAt <= existing.updatedAt else { return .fullFetch }
-        guard needsStatusRefresh(existing.buildStatus) else { return .reuse }
-        // A status-only refresh needs the head SHA; PRs persisted before that field
-        // existed lack it, so fall back to a full fetch (which repopulates it).
         return existing.headSHA == nil ? .fullFetch : .reuseRefreshingStatus
     }
 
@@ -139,8 +132,9 @@ actor PollingService {
         return pr
     }
 
-    /// Refresh just the CI status for reused PRs whose build is still in flight —
-    /// one `/commits/{sha}/status` call each, bounded to 5 concurrent.
+    /// Refresh just the CI status for reused PRs — one `/commits/{sha}/status` call
+    /// each, bounded to 5 concurrent. CI status changes without bumping `updatedAt`, so
+    /// even a PR whose details we're reusing needs its status re-checked every poll.
     private func refreshStatuses(_ prs: [PullRequest]) async -> [PullRequest] {
         guard !prs.isEmpty else { return [] }
         let client = githubClient
@@ -242,17 +236,14 @@ actor PollingService {
                 }
 
                 // Diff each item's updatedAt against what we have stored to decide whether
-                // to reuse it (skipping the 7-call detail fetch), refresh only its CI, or
-                // fully re-fetch. This is the bulk of the sync-time win.
-                var reuseExisting: [PullRequest] = []
+                // to reuse its details and refresh only its CI (1 call), or fully
+                // re-fetch (7 calls). This is the bulk of the sync-time win.
                 var statusRefresh: [PullRequest] = []
                 var itemsToFetch: [GitHubSearchItem] = []
                 for item in orderedItems {
                     let id = "\(item.repoFullName)#\(item.number)"
                     let existing = existingByID[id]
                     switch Self.fetchPlan(existing: existing, currentUpdatedAt: item.updatedAt) {
-                    case .reuse:
-                        if let existing { reuseExisting.append(existing) }
                     case .reuseRefreshingStatus:
                         if let existing { statusRefresh.append(existing) }
                     case .fullFetch:
@@ -267,7 +258,7 @@ actor PollingService {
                 )
 
                 var merged: [(pr: PullRequest, isRequested: Bool)] = []
-                for pr in reuseExisting + refreshed {
+                for pr in refreshed {
                     merged.append((reusableCopy(of: pr), requestedFlagByID[pr.id] ?? false))
                 }
                 for pr in fetched {
