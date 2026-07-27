@@ -6,20 +6,20 @@
         <description>PRSieve updates feed</description>
         <language>en</language>
         <item>
-            <title>Version 0.9.5</title>
-            <pubDate>Mon, 22 Jun 2026 16:14:52 +0000</pubDate>
-            <sparkle:version>0.9.5</sparkle:version>
-            <sparkle:shortVersionString>0.9.5</sparkle:shortVersionString>
+            <title>Version 0.9.6</title>
+            <pubDate>Mon, 27 Jul 2026 23:31:07 +0000</pubDate>
+            <sparkle:version>0.9.6</sparkle:version>
+            <sparkle:shortVersionString>0.9.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
 <ul>
-                <li>Detects when a PR's CI flips from passing to failing, even if nothing else about the PR changed</li>
+                <li>Priority PRs now show full merge readiness (checks, reviews, and branch rules) instead of just CI status.</li>
             </ul>
             ]]></description>
             <enclosure
-                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.5/PRSieve.zip"
-                sparkle:edSignature="N5RWEBtbkh6XPyAJRECkpzf46S2KkfYGLCX4gh8uzhvahOqTdgj3ysGEM1cmTirsyZv8+ra/YMINQDVz7tyGAg=="
-                length="2531662"
+                url="https://github.com/jasonostrander/prsieve/releases/download/v0.9.6/PRSieve.zip"
+                sparkle:edSignature="iedCOIgk93VRu3odizI3CSxzP/kg5ujTd++dbvaOdXbh3pj2JrJrz8/AE/oVf+u5NSxFANDU7XifAvIDy/6dCA=="
+                length="2587982"
                 type="application/octet-stream" />
         </item>
     </channel>
