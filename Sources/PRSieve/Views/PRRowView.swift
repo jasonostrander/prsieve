@@ -101,8 +101,10 @@ struct PRCardView: View {
 
     private var reviewSummary: some View {
         HStack(spacing: 6) {
-            readinessPill
-            reviewStatusPill
+            VStack(alignment: .trailing, spacing: 4) {
+                readinessPill
+                reviewStatusPill
+            }
 
             if pr.humanCommentCount > 0 {
                 HStack(spacing: 2) {
