@@ -38,9 +38,9 @@ Sources/PRSieve/
     PullRequest.swift           # Core PR model, ReviewerInfo, ReviewStatus
     Category.swift              # PRCategory: priority, low, noise
     AppSettings.swift           # User configuration
-    BuildStatus.swift           # CI status enum (passed/failed/running/unknown)
+    PRReadiness.swift           # Merge/check/review readiness model + evaluator
   Services/
-    GitHubClient.swift          # GitHub REST API (search, PR details, reviews, CODEOWNERS, combined CI status)
+    GitHubClient.swift          # GitHub REST + GraphQL (details, rules, readiness)
     LLMClient.swift             # OpenAI-compatible chat completions, LLMProvider protocol
     LLMConfig.swift             # Loads endpoint/token/model from bundled llm_config.plist
     LLMSystemPrompt.swift       # LLM system prompt (edit to tune categorization behavior)
@@ -65,7 +65,7 @@ Sources/PRSieve/
 
 ## Key Design Decisions
 
-- **Menu bar app**: Runs as `LSUIElement` (no Dock icon). Left-click shows PR popover, right-click shows context menu (Refresh, Check for Updates…, Settings, Quit). Status bar icon turns orange when priority PRs with passing CI exist.
+- **Menu bar app**: Runs as `LSUIElement` (no Dock icon). Left-click shows PR popover, right-click shows context menu (Refresh, Check for Updates…, Settings, Quit). Status bar icon turns orange when priority PRs are ready for review.
 - **No Xcode**: Built entirely with SPM. `run.sh` creates a minimal .app bundle.
 - **No Keychain**: Tokens stored in `~/.../PRSieve/.tokens.json` with 0600 permissions (unsigned app causes Keychain prompts).
 - **LLM credentials baked into the bundle**: Endpoint, token, and model live in `llm_config.json` at the project root (gitignored). `run.sh`/`release.sh` convert it to a **binary plist** (`Contents/Resources/llm_config.plist`) and `LLMConfig.loadFromBundle()` reads it via `Bundle.main`. Use `llm_config.example.json` as the template. Users only configure the prompt (ownership context) via Settings. JSON-key is `token` (not `apiKey`) so corporate DLP doesn't recognize the file as credentials; binary plist further hides it from text-based scanners. **Empty token is valid**: the default endpoint is the Instacart AI gateway, which authenticates at the gateway, so `token` is intentionally empty there. `LLMClient` only treats the literal placeholder `sk-...` as "not configured" (throwing `LLMError.notConfigured`); for any other value — including `""` — it sends the request, omitting the `Authorization` header when the token is empty. Set a real `token` only for providers that require a bearer key (e.g. OpenAI).
@@ -82,11 +82,11 @@ Sources/PRSieve/
   - Everything else goes to the LLM.
 - **CODEOWNERS parsing**: Parses repo CODEOWNERS files with gitignore-style glob matching. `isDirectCodeowner` is set to true when the user owns specific (non-catch-all) patterns for the changed files. Passed to the LLM as context.
 - **LLM prompt focuses on file paths**: System prompt in `LLMSystemPrompt.swift` tells the LLM to categorize based on changed file paths and the user's ownership context. Edit that file to tune behavior.
-- **CI status via GitHub**: Uses the combined commit status API (`/commits/{sha}/status`). Status bar icon only highlights orange for priority PRs with passing CI.
+- **Merge readiness via GitHub**: Uses GraphQL PR mergeability, review decision, and the fully paginated status-check rollup, plus the REST Rules API for active base-branch requirements. Readiness fails closed when GitHub state or an enforced rule cannot be evaluated. Optional checks such as `danger/danger` do not block readiness; missing, pending, or failing required checks do. See [`PR_READINESS.md`](PR_READINESS.md) for the complete predicate, API inputs, caching, and notification behavior.
 - **Actor-based services**: GitHubClient, LLMClient, PersistenceService, PollingService are all actors for thread safety.
 - **Bounded concurrency**: PR detail fetching and LLM categorization use TaskGroup with max 5 concurrent operations.
 - **Categorization caching**: A PR keeps its stored category (skipping re-categorization and the LLM call it implies) when it hasn't changed since it was last categorized — `pr.updatedAt <= lastCategorizedAt` — *and* the non-`updatedAt` inputs are unchanged. Those inputs (system prompt, ownership context, username, codeowner/reviewer flags) are captured in `PullRequest.categorizationContextHash`, a stable FNV-1a fingerprint (`PollingService.categorizationFingerprint`). `PollingService.canReuseCategorization` is the reuse gate. Editing the ownership prompt, shipping a new `llmSystemPrompt`, or a CODEOWNERS change all flip the fingerprint and force a one-time recompute; legacy PRs with a nil hash also recompute once.
-- **Selective detail fetching (sync speed)**: The expensive part of a refresh is the per-PR detail fan-out — `GitHubClient.fetchPRDetail` makes ~7 REST calls (detail, files, reviews, review comments, issue comments, timeline, combined status). To avoid paying that for unchanged PRs, polling first does the cheap search (`fetchReviewRequestItems` / `fetchReviewedItems`, which already return each PR's `updatedAt`) and diffs against the stored PR via `PollingService.fetchPlan`: `.reuseRefreshingStatus` (1 call) when `updatedAt` hasn't advanced — reuse the stored details but always re-check CI; `.fullFetch` (7 calls) when new, changed, or a legacy PR without a stored `headSHA`. **Key caveat**: CI/commit status does *not* bump a PR's `updatedAt` (it attaches to the commit SHA), so a cached build status can't be trusted — even a `.passed` build can flip to `.failed` on the *same commit* (e.g. a Buildkite re-run, or a previously-pending/absent check resolving to failure) with no `updatedAt` change. So every unchanged PR gets a status-only `/commits/{sha}/status` refresh each poll (which is why `PullRequest.headSHA` is persisted); there is no longer a 0-call "settled" tier. This catches both the "went green" event (drives the priority highlight + notifications) and the "went red after being green" event (the bug that motivated dropping the `.passed`-is-settled assumption). Reused PRs are run through `reusableCopy` (categorization-decision fields reset) so the override/cache gate re-derives the verdict uniformly: a settings/prompt change still triggers an LLM re-eval without re-fetching from GitHub. GraphQL (single-request fan-out) is the next step under evaluation if more speed is needed.
+- **Selective detail fetching (sync speed)**: Polling first performs the cheap search (`fetchReviewRequestItems` / `fetchReviewedItems`) and diffs each result against the stored PR. A new or changed PR gets the full REST detail fan-out plus readiness evaluation. An unchanged PR with a stored `headSHA` reuses those details but always refreshes GraphQL readiness via `.reuseRefreshingReadiness`. Checks can change on the same commit without advancing the PR's `updatedAt`, so no cached readiness state is treated as settled. PRs persisted before `headSHA` existed get one full fetch. Reused PRs go through `reusableCopy`, which preserves readiness and its notification baseline while resetting categorization-decision fields so settings or prompt changes can still trigger an LLM reevaluation.
 - **LLMProvider protocol**: Enables mock LLM in tests without network calls.
 - **Tests without XCTest**: Uses a lightweight custom test runner compiled via `test.sh` (works with Command Line Tools only, no Xcode SDK needed).
 - **Disappeared PR handling**: PRs that vanish from GitHub search results (e.g. review dismissed, team assignment) are re-fetched to check actual state before marking merged.
@@ -94,7 +94,7 @@ Sources/PRSieve/
 ## Sections
 
 The PR list has four sections:
-- **Priority** — PRs matching your ownership context or pre-filter rules, with passing CI
+- **Priority** — PRs matching your ownership context or pre-filter rules, with a readiness indicator
 - **Low** — Other review requests, LLM-determined not in your area
 - **Noise** — Drafts, releases, strings PRs (auto-filtered, no LLM call)
 - **Reviewed** — PRs you've already approved (collapsed by default)
@@ -109,14 +109,14 @@ Configured via the popover footer or right-click > Settings:
 - **Polling interval**: 15 minutes, 30 minutes (default), 1 hour, or 2 hours
 - **Hide draft PRs**: Toggle (default on)
 - **Keep unreviewed priority PRs visible for 3 days after merge**: Toggle (default on)
-- **Notify when priority PRs pass CI**: Toggle (default on)
+- **Notify when priority PRs become ready for review**: Toggle (default on)
 - **Automatically check for updates**: Toggle (default on; Sparkle polls the appcast daily) + manual "Check for Updates Now" button
 
 ## Notifications
 
-- Sends macOS notifications for priority PRs when CI passes
+- Sends macOS notifications when priority PRs transition to ready for review
 - Skips PRs you've already reviewed (any non-pending review state)
-- Notified PR IDs persisted to disk — no re-notification on app restart
+- The last definitive readiness state is persisted per PR so transitions survive app restarts; unknown refreshes preserve the prior baseline
 - Clicking a notification opens the PR in the browser
 
 ## Testing
@@ -134,7 +134,6 @@ All in `~/Library/Application Support/PRSieve/`:
 - `settings.json` — non-secret settings
 - `.tokens.json` — GitHub token (0600 perms)
 - `pull_requests.json` — cached PRs with categories
-- `notified_pr_ids.json` — persisted set of already-notified PR IDs
 - `codeowners_cache/` — per-repo CODEOWNERS files
 
 LLM credentials are *not* stored here — they come from the bundled `llm_config.plist` (see "LLM credentials baked into the bundle" above).

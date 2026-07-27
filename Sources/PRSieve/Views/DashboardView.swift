@@ -34,7 +34,7 @@ struct DashboardView: View {
                     Toggle(isOn: $viewModel.showReadyToMerge) {
                         Image(systemName: "checkmark.diamond")
                     }
-                    .help("Show only PRs with passing CI")
+                    .help("Show only PRs ready for review")
 
                     Button {
                         showSettings = true

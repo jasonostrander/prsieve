@@ -3,20 +3,17 @@ import Foundation
 struct RepoConfig: Codable, Sendable, Identifiable, Hashable {
     var id: String { repo }
     let repo: String  // "owner/repo"
-    var buildkitePipeline: String?  // optional override for pipeline slug
 }
 
 struct AppSettings: Codable, Sendable, Equatable {
     var githubUsername: String = ""
     var repos: [RepoConfig] = []
-    var buildkiteOrgSlug: String = ""
     var codeownerContext: String = ""
     var llmModel: String = ""
     var pollingIntervalSeconds: Int = 1800
     var hideDraftPRs: Bool = true
     var notificationsEnabled: Bool = true
     var keepUnreviewedPriorityAfterMerge: Bool = true
-    var ignoredCIChecks: [String] = ["danger/danger"]
     var launchAtLogin: Bool = false
 
     /// Bumped whenever a one-time settings migration must run on load. Persisted so
@@ -41,13 +38,11 @@ struct AppSettings: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         githubUsername = try container.decodeIfPresent(String.self, forKey: .githubUsername) ?? ""
         repos = try container.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
-        buildkiteOrgSlug = try container.decodeIfPresent(String.self, forKey: .buildkiteOrgSlug) ?? ""
         codeownerContext = try container.decodeIfPresent(String.self, forKey: .codeownerContext) ?? ""
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         hideDraftPRs = try container.decodeIfPresent(Bool.self, forKey: .hideDraftPRs) ?? true
         notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         keepUnreviewedPriorityAfterMerge = try container.decodeIfPresent(Bool.self, forKey: .keepUnreviewedPriorityAfterMerge) ?? true
-        ignoredCIChecks = try container.decodeIfPresent([String].self, forKey: .ignoredCIChecks) ?? ["danger/danger"]
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
 
         // Files predating `schemaVersion` decode as 0, so any migration runs once.

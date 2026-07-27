@@ -236,23 +236,12 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Notify when Review PRs pass CI", isOn: $viewModel.settings.notificationsEnabled)
+                Toggle("Notify when Review PRs are ready", isOn: $viewModel.settings.notificationsEnabled)
                 notificationAuthRow
             } header: {
                 Text("Notifications")
             } footer: {
                 Text("PRSieve uses macOS system notifications. If you previously denied permission, allow it again in System Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                TextField("e.g. danger/danger, lint", text: ignoredCIChecksText)
-                    .help("Comma-separated check names to ignore when computing CI status")
-            } header: {
-                Text("Ignored CI Checks")
-            } footer: {
-                Text("If all remaining checks pass, CI is considered green.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -321,18 +310,6 @@ struct SettingsView: View {
         Binding(
             get: { updater.automaticallyChecksForUpdates },
             set: { updater.automaticallyChecksForUpdates = $0 }
-        )
-    }
-
-    private var ignoredCIChecksText: Binding<String> {
-        Binding(
-            get: { viewModel.settings.ignoredCIChecks.joined(separator: ", ") },
-            set: {
-                viewModel.settings.ignoredCIChecks = $0
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-            }
         )
     }
 

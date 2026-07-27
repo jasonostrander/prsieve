@@ -3,8 +3,9 @@ import Foundation
 actor GitHubClient {
     private let session: URLSession
     private var token: String
-    private var ignoredCIChecks: Set<String> = ["danger/danger"]
+    private var rulesCache: [String: (fetchedAt: Date, rules: ActiveBranchRules)] = [:]
     private let baseURL = URL(string: "https://api.github.com")!
+    private let graphQLURL = URL(string: "https://api.github.com/graphql")!
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -25,10 +26,6 @@ actor GitHubClient {
 
     func updateToken(_ token: String) {
         self.token = token
-    }
-
-    func updateIgnoredCIChecks(_ checks: [String]) {
-        ignoredCIChecks = Set(checks)
     }
 
     // MARK: - Fetch PRs requesting review from user
@@ -129,14 +126,18 @@ actor GitHubClient {
         async let reviewCommentsData = fetch(repoURL(repo, path: "/pulls/\(number)/comments"))
         async let issueCommentsData = fetch(repoURL(repo, path: "/issues/\(number)/comments"))
         async let timelineData = fetch(repoURL(repo, path: "/issues/\(number)/timeline?per_page=100"))
-        async let statusResult = fetchCombinedStatus(repo: repo, ref: ghPR.head.sha)
 
         let files = try decoder.decode([GitHubFile].self, from: try await filesData)
         let reviews = try decoder.decode([GitHubReview].self, from: try await reviewsData)
         let reviewComments = try decoder.decode([GitHubComment].self, from: try await reviewCommentsData)
         let issueComments = try decoder.decode([GitHubComment].self, from: try await issueCommentsData)
         let timeline = (try? decoder.decode([GitHubTimelineEvent].self, from: try await timelineData)) ?? []
-        let buildStatus = try await statusResult
+        let readiness = (try? await fetchReadiness(
+            repo: repo,
+            number: number,
+            expectedHeadSHA: ghPR.head.sha,
+            filesChanged: files.map(\.filename)
+        )) ?? .unknown()
 
         let reviewers = Self.perReviewerStatus(from: reviews)
         let isSoleHumanReviewer = Self.isSoleHumanReviewer(
@@ -184,7 +185,7 @@ actor GitHubClient {
             category: .low,
             categoryOverridden: false,
             categoryReason: "",
-            buildStatus: buildStatus,
+            readiness: readiness,
             isMerged: ghPR.merged ?? false,
             isClosed: ghPR.state == "closed",
             isFlagged: false,
@@ -192,45 +193,187 @@ actor GitHubClient {
         )
     }
 
-    // MARK: - Combined CI Status
+    // MARK: - Merge readiness
 
-    func fetchCombinedStatus(repo: String, ref: String) async throws -> BuildStatus {
-        let url = repoURL(repo, path: "/commits/\(ref)/status")
-        do {
-            let data = try await fetch(url)
-            let status = try decoder.decode(GitHubCombinedStatus.self, from: data)
+    func fetchReadiness(
+        repo: String,
+        number: Int,
+        expectedHeadSHA: String?,
+        filesChanged: [String]
+    ) async throws -> PRReadiness {
+        for attempt in 0..<3 {
+            let snapshot = try await fetchReadinessSnapshot(repo: repo, number: number)
+            let rules = try await activeRules(repo: repo, branch: snapshot.baseRefName)
+            let readiness = ReadinessEvaluator.evaluate(
+                state: snapshot.state,
+                isDraft: snapshot.isDraft,
+                mergeableState: snapshot.mergeable,
+                mergeStateStatus: snapshot.mergeStateStatus,
+                reviewDecision: snapshot.reviewDecision,
+                contexts: snapshot.contexts,
+                rules: rules,
+                filesChanged: filesChanged,
+                headMatches: snapshot.headRefOID == snapshot.commitOID
+                    && (expectedHeadSHA == nil || snapshot.headRefOID == expectedHeadSHA)
+            )
 
-            // If no ignored checks configured, use the pre-rolled state from GitHub
-            if ignoredCIChecks.isEmpty {
-                switch status.state {
-                case "success": return .passed
-                case "failure", "error": return .failed
-                case "pending": return status.totalCount == 0 ? .unknown : .running
-                default: return .unknown
-                }
+            if readiness.blocker != .githubStateUnknown || attempt == 2 {
+                return readiness
             }
-
-            // Filter out ignored checks and recompute state from the remaining ones
-            let relevant = status.statuses.filter { !ignoredCIChecks.contains($0.context) }
-
-            if relevant.isEmpty {
-                // All checks were ignored (or no checks at all)
-                return status.statuses.isEmpty ? .unknown : .passed
-            }
-
-            if relevant.contains(where: { $0.state == "failure" || $0.state == "error" }) {
-                return .failed
-            }
-            if relevant.contains(where: { $0.state == "pending" }) {
-                return .running
-            }
-            if relevant.allSatisfy({ $0.state == "success" }) {
-                return .passed
-            }
-            return .unknown
-        } catch {
-            return .unknown
+            try await Task.sleep(for: .milliseconds(500))
         }
+        return .unknown()
+    }
+
+    private func fetchReadinessSnapshot(repo: String, number: Int) async throws -> GitHubReadinessSnapshot {
+        let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { throw GitHubError.invalidResponse }
+
+        var after: String?
+        var allContexts: [CheckContext] = []
+        var snapshot: GitHubReadinessSnapshot?
+
+        repeat {
+            let response = try await graphQLReadiness(
+                owner: parts[0],
+                repo: parts[1],
+                number: number,
+                after: after
+            )
+            let pr = response.data?.repository?.pullRequest
+            guard let pr,
+                  let commit = pr.commits.nodes.first?.commit
+            else { throw GitHubError.invalidResponse }
+
+            allContexts.append(contentsOf: commit.statusCheckRollup?.contexts.nodes.map(\.checkContext) ?? [])
+            snapshot = GitHubReadinessSnapshot(
+                state: pr.state,
+                isDraft: pr.isDraft,
+                mergeable: MergeableState(rawValue: pr.mergeable) ?? .unknown,
+                mergeStateStatus: MergeStateStatus(rawValue: pr.mergeStateStatus) ?? .unknown,
+                reviewDecision: pr.reviewDecision.flatMap(ReviewDecision.init(rawValue:)),
+                baseRefName: pr.baseRefName,
+                headRefOID: pr.headRefOID,
+                commitOID: commit.oid,
+                contexts: allContexts
+            )
+
+            let pageInfo = commit.statusCheckRollup?.contexts.pageInfo
+            after = pageInfo?.hasNextPage == true ? pageInfo?.endCursor : nil
+        } while after != nil
+
+        guard let snapshot else { throw GitHubError.invalidResponse }
+        return snapshot
+    }
+
+    private func graphQLReadiness(
+        owner: String,
+        repo: String,
+        number: Int,
+        after: String?
+    ) async throws -> GitHubGraphQLResponse {
+        let query = """
+        query Readiness($owner: String!, $repo: String!, $number: Int!, $after: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $number) {
+              state
+              isDraft
+              mergeable
+              mergeStateStatus
+              reviewDecision
+              baseRefName
+              headRefOid
+              commits(last: 1) {
+                nodes {
+                  commit {
+                    oid
+                    statusCheckRollup {
+                      contexts(first: 100, after: $after) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          __typename
+                          ... on StatusContext {
+                            context
+                            state
+                            isRequired(pullRequestNumber: $number)
+                          }
+                          ... on CheckRun {
+                            name
+                            status
+                            conclusion
+                            isRequired(pullRequestNumber: $number)
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        var variables: [String: Any] = [
+            "owner": owner,
+            "repo": repo,
+            "number": number,
+        ]
+        if let after { variables["after"] = after }
+        let body = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
+        let data = try await fetch(graphQLURL, method: "POST", body: body)
+        let response = try decoder.decode(GitHubGraphQLResponse.self, from: data)
+        if let errors = response.errors, !errors.isEmpty {
+            throw GitHubError.graphQLError(errors.map(\.message).joined(separator: "; "))
+        }
+        return response
+    }
+
+    private func activeRules(repo: String, branch: String) async throws -> ActiveBranchRules {
+        let key = "\(repo)#\(branch)"
+        if let cached = rulesCache[key],
+           Date().timeIntervalSince(cached.fetchedAt) < 3600 {
+            return cached.rules
+        }
+
+        var branchPathCharacters = CharacterSet.urlPathAllowed
+        branchPathCharacters.remove(charactersIn: "/")
+        guard let encodedBranch = branch.addingPercentEncoding(withAllowedCharacters: branchPathCharacters) else {
+            throw GitHubError.invalidResponse
+        }
+        let data = try await fetch(repoURL(repo, path: "/rules/branches/\(encodedBranch)"))
+        let rawRules = try decoder.decode([GitHubBranchRule].self, from: data)
+        let supported: Set<String> = [
+            "required_status_checks",
+            "pull_request",
+            "file_path_restriction",
+            "non_fast_forward",
+            "deletion",
+        ]
+        var requiredNames = Set<String>()
+        var strict = false
+        var restrictedPatterns: [String] = []
+        var unsupported = false
+
+        for rule in rawRules {
+            switch rule.type {
+            case "required_status_checks":
+                requiredNames.formUnion(rule.parameters?.requiredStatusChecks?.map(\.context) ?? [])
+                strict = strict || (rule.parameters?.strictRequiredStatusChecksPolicy ?? false)
+            case "file_path_restriction":
+                restrictedPatterns.append(contentsOf: rule.parameters?.restrictedFilePaths ?? [])
+            default:
+                if !supported.contains(rule.type) { unsupported = true }
+            }
+        }
+
+        let rules = ActiveBranchRules(
+            requiredCheckNames: requiredNames,
+            strictRequiredChecks: strict,
+            restrictedFilePatterns: restrictedPatterns,
+            hasUnsupportedBlockingRules: unsupported
+        )
+        rulesCache[key] = (Date(), rules)
+        return rules
     }
 
     // MARK: - Lightweight PR state check
@@ -285,9 +428,18 @@ actor GitHubClient {
 
     // MARK: - Networking
 
-    private func fetch(_ url: URL) async throws -> Data {
+    private func fetch(
+        _ url: URL,
+        method: String = "GET",
+        body: Data? = nil
+    ) async throws -> Data {
         var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if body != nil {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw GitHubError.invalidResponse
@@ -390,6 +542,7 @@ actor GitHubClient {
 enum GitHubError: Error, LocalizedError, Sendable {
     case invalidResponse
     case httpError(Int, String?)
+    case graphQLError(String)
 
     var errorDescription: String? {
         switch self {
@@ -408,6 +561,8 @@ enum GitHubError: Error, LocalizedError, Sendable {
             return "GitHub: Validation error (422) — \(body?.prefix(200) ?? "unknown")"
         case .httpError(let code, let body):
             return "GitHub: HTTP \(code) — \(body?.prefix(200) ?? "unknown")"
+        case .graphQLError(let message):
+            return "GitHub GraphQL: \(message)"
         }
     }
 }
@@ -501,25 +656,135 @@ struct GitHubPRState: Decodable, Sendable {
     let merged: Bool?
 }
 
-// Combined commit status
-struct GitHubCombinedStatus: Decodable, Sendable {
-    let state: String  // "success", "failure", "error", "pending"
-    let totalCount: Int
-    let statuses: [GitHubStatusContext]
+// MARK: - GraphQL readiness response
+
+private struct GitHubReadinessSnapshot: Sendable {
+    let state: String
+    let isDraft: Bool
+    let mergeable: MergeableState
+    let mergeStateStatus: MergeStateStatus
+    let reviewDecision: ReviewDecision?
+    let baseRefName: String
+    let headRefOID: String
+    let commitOID: String
+    let contexts: [CheckContext]
+}
+
+private struct GitHubGraphQLResponse: Decodable, Sendable {
+    let data: GitHubGraphQLData?
+    let errors: [GitHubGraphQLError]?
+}
+
+private struct GitHubGraphQLError: Decodable, Sendable {
+    let message: String
+}
+
+private struct GitHubGraphQLData: Decodable, Sendable {
+    let repository: GitHubGraphQLRepository?
+}
+
+private struct GitHubGraphQLRepository: Decodable, Sendable {
+    let pullRequest: GitHubGraphQLPullRequest?
+}
+
+private struct GitHubGraphQLPullRequest: Decodable, Sendable {
+    let state: String
+    let isDraft: Bool
+    let mergeable: String
+    let mergeStateStatus: String
+    let reviewDecision: String?
+    let baseRefName: String
+    let headRefOID: String
+    let commits: GitHubGraphQLCommitConnection
 
     enum CodingKeys: String, CodingKey {
-        case state, statuses, totalCount
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        state = try container.decode(String.self, forKey: .state)
-        totalCount = try container.decode(Int.self, forKey: .totalCount)
-        statuses = try container.decodeIfPresent([GitHubStatusContext].self, forKey: .statuses) ?? []
+        case state, isDraft, mergeable, mergeStateStatus, reviewDecision, baseRefName
+        case headRefOID = "headRefOid"
+        case commits
     }
 }
 
-struct GitHubStatusContext: Decodable, Sendable {
-    let state: String   // "success", "failure", "error", "pending"
-    let context: String // e.g. "Buildkite", "danger/danger"
+private struct GitHubGraphQLCommitConnection: Decodable, Sendable {
+    let nodes: [GitHubGraphQLCommitNode]
+}
+
+private struct GitHubGraphQLCommitNode: Decodable, Sendable {
+    let commit: GitHubGraphQLCommit
+}
+
+private struct GitHubGraphQLCommit: Decodable, Sendable {
+    let oid: String
+    let statusCheckRollup: GitHubGraphQLStatusRollup?
+}
+
+private struct GitHubGraphQLStatusRollup: Decodable, Sendable {
+    let contexts: GitHubGraphQLContextConnection
+}
+
+private struct GitHubGraphQLContextConnection: Decodable, Sendable {
+    let pageInfo: GitHubGraphQLPageInfo
+    let nodes: [GitHubGraphQLContext]
+}
+
+private struct GitHubGraphQLPageInfo: Decodable, Sendable {
+    let hasNextPage: Bool
+    let endCursor: String?
+}
+
+private struct GitHubGraphQLContext: Decodable, Sendable {
+    let typeName: String
+    let context: String?
+    let name: String?
+    let state: String?
+    let status: String?
+    let conclusion: String?
+    let isRequired: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case typeName = "__typename"
+        case context, name, state, status, conclusion, isRequired
+    }
+
+    var checkContext: CheckContext {
+        let resolvedName = context ?? name ?? "Unknown"
+        let result: CheckResult
+        if typeName == "StatusContext" {
+            switch state {
+            case "SUCCESS": result = .passed
+            case "FAILURE", "ERROR": result = .failed
+            case "EXPECTED", "PENDING": result = .running
+            default: result = .unknown
+            }
+        } else if status != "COMPLETED" {
+            result = ["REQUESTED", "QUEUED", "IN_PROGRESS", "WAITING", "PENDING"].contains(status ?? "")
+                ? .running : .unknown
+        } else {
+            switch conclusion {
+            case "SUCCESS", "NEUTRAL", "SKIPPED": result = .passed
+            case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE":
+                result = .failed
+            default:
+                result = .unknown
+            }
+        }
+        return CheckContext(name: resolvedName, isRequired: isRequired, result: result)
+    }
+}
+
+// MARK: - Active branch rules
+
+private struct GitHubBranchRule: Decodable, Sendable {
+    let type: String
+    let parameters: GitHubBranchRuleParameters?
+}
+
+private struct GitHubBranchRuleParameters: Decodable, Sendable {
+    let requiredStatusChecks: [GitHubRequiredStatusCheck]?
+    let strictRequiredStatusChecksPolicy: Bool?
+    let restrictedFilePaths: [String]?
+}
+
+private struct GitHubRequiredStatusCheck: Decodable, Sendable {
+    let context: String
+    let integrationId: Int?
 }

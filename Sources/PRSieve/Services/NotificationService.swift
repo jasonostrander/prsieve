@@ -13,18 +13,14 @@ enum NotificationAuthState: Sendable {
 
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
-    private var notifiedPRIDs: Set<String> = []
     private(set) var authorized = false
-    private let persistence: PersistenceService
 
-    init(persistence: PersistenceService) {
-        self.persistence = persistence
+    override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
     }
 
     func requestAuthorization() async {
-        notifiedPRIDs = await persistence.loadNotifiedPRIDs()
         do {
             authorized = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])
@@ -74,13 +70,13 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// Send notifications for new priority PRs with passing CI that haven't been reviewed yet.
+    /// Send notifications for priority PRs whose persisted readiness just
+    /// transitioned from not-ready to ready.
     func notifyIfNeeded(prs: [PullRequest], username: String = "") async {
         guard authorized else { return }
 
         let actionable = prs.filter {
-            guard $0.category == .priority && $0.buildStatus == .passed else { return false }
-            guard !notifiedPRIDs.contains($0.id) else { return false }
+            guard $0.category == .priority && $0.isReadyForReview else { return false }
             // Don't re-notify for PRs the user has already reviewed
             if !username.isEmpty && $0.reviewers.contains(where: {
                 $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state != .pending
@@ -90,19 +86,6 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
 
         for pr in actionable {
             sendNotification(for: pr)
-            notifiedPRIDs.insert(pr.id)
-        }
-        if !actionable.isEmpty {
-            await persistence.saveNotifiedPRIDs(notifiedPRIDs)
-        }
-    }
-
-    /// Clear tracked IDs for PRs that are no longer open, to keep the set bounded.
-    func pruneNotified(currentPRIDs: Set<String>) async {
-        let pruned = notifiedPRIDs.intersection(currentPRIDs)
-        if pruned.count != notifiedPRIDs.count {
-            notifiedPRIDs = pruned
-            await persistence.saveNotifiedPRIDs(notifiedPRIDs)
         }
     }
 

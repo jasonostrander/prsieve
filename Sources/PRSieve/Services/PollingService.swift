@@ -7,6 +7,7 @@ struct RepoFetchError: Sendable, Equatable {
 
 struct RefreshResult: Sendable {
     let prs: [PullRequest]
+    let notificationCandidates: [PullRequest]
     let llmError: LLMError?
     let repoErrors: [RepoFetchError]
 }
@@ -14,7 +15,6 @@ struct RefreshResult: Sendable {
 actor PollingService {
     private let persistence: PersistenceService
     private let githubClient: GitHubClient
-    private let buildkiteClient: BuildkiteClient
     private let categorizationService: CategorizationService
     private var settings: AppSettings
     private var isPolling = false
@@ -23,13 +23,11 @@ actor PollingService {
     init(
         persistence: PersistenceService,
         githubClient: GitHubClient,
-        buildkiteClient: BuildkiteClient,
         categorizationService: CategorizationService,
         settings: AppSettings
     ) {
         self.persistence = persistence
         self.githubClient = githubClient
-        self.buildkiteClient = buildkiteClient
         self.categorizationService = categorizationService
         self.settings = settings
     }
@@ -97,31 +95,31 @@ actor PollingService {
 
     /// How to obtain a PR's current state, given its `updatedAt` from search and what
     /// we already have stored. The search result's `updatedAt` is authoritative for
-    /// PR-resource changes (commits, comments, reviews, labels…); CI status is the one
-    /// thing it misses, hence the status-only refresh case.
+    /// PR-resource changes (commits, comments, reviews, labels…); merge/check readiness
+    /// is the one thing it misses, hence the readiness-only refresh case.
     enum FetchPlan: Equatable {
-        case fullFetch              // new PR, or changed since last sync → 7 API calls
-        case reuseRefreshingStatus  // unchanged → reuse details, refresh CI → 1 API call
+        case fullFetch              // new PR, or changed since last sync → full detail fan-out
+        case reuseRefreshingReadiness // unchanged → reuse details, refresh readiness
     }
 
     /// Decide how to refresh a PR. A newer `updatedAt` (or a PR we've never seen) means
     /// its resources changed → full fetch. Otherwise the PR's resources are unchanged,
-    /// but its CI/commit status still can't be trusted from cache: status attaches to the
-    /// commit SHA and changes *without* bumping `updatedAt`, so a re-run on the same
-    /// commit can flip a previously-green check to red (or red to green) and we'd never
-    /// see it. So we always re-check CI for an unchanged PR via a single
-    /// `/commits/{sha}/status` call. That needs the head SHA; PRs persisted before that
-    /// field existed lack it, so they fall back to a full fetch (which repopulates it).
+    /// but its merge/check readiness still can't be trusted from cache: checks attach to
+    /// the commit SHA and change *without* bumping `updatedAt`, so a re-run on the same
+    /// commit can change readiness and we'd never see it. We therefore re-query GraphQL
+    /// readiness for every unchanged PR. That needs the head SHA; PRs persisted before
+    /// that field existed lack it, so they fall back to a full fetch.
     static func fetchPlan(existing: PullRequest?, currentUpdatedAt: Date) -> FetchPlan {
         guard let existing, currentUpdatedAt <= existing.updatedAt else { return .fullFetch }
-        return existing.headSHA == nil ? .fullFetch : .reuseRefreshingStatus
+        return existing.headSHA == nil ? .fullFetch : .reuseRefreshingReadiness
     }
 
     /// A stored PR reused without re-fetching, with its categorization-decision fields
     /// reset to the same state a freshly-fetched PR has. This lets the shared
     /// override/cache gate below re-derive the verdict uniformly — restoring it from the
     /// stored copy when nothing relevant changed, or re-running the LLM if (say) the
-    /// ownership prompt changed. Data fields (files, reviewers, build status…) are kept.
+    /// ownership prompt changed. Data fields (files, reviewers, readiness and its
+    /// notification baseline) are kept.
     private func reusableCopy(of existing: PullRequest) -> PullRequest {
         var pr = existing
         pr.category = .low
@@ -132,13 +130,13 @@ actor PollingService {
         return pr
     }
 
-    /// Refresh just the CI status for reused PRs — one `/commits/{sha}/status` call
-    /// each, bounded to 5 concurrent. CI status changes without bumping `updatedAt`, so
-    /// even a PR whose details we're reusing needs its status re-checked every poll.
-    private func refreshStatuses(_ prs: [PullRequest]) async -> [PullRequest] {
+    /// Refresh merge/check readiness for reused PRs, bounded to 5 concurrent.
+    /// Check state changes without bumping `updatedAt`, so every reused PR must
+    /// be re-checked on every poll.
+    private func refreshReadiness(_ prs: [PullRequest]) async -> [PullRequest] {
         guard !prs.isEmpty else { return [] }
         let client = githubClient
-        return await withTaskGroup(of: (Int, BuildStatus?).self) { group in
+        return await withTaskGroup(of: (Int, PRReadiness).self) { group in
             let maxConcurrency = 5
             var results = prs
             var index = 0
@@ -146,9 +144,13 @@ actor PollingService {
             func addTask(_ i: Int) {
                 let pr = prs[i]
                 group.addTask {
-                    guard let sha = pr.headSHA else { return (i, pr.buildStatus) }
-                    let status = try? await client.fetchCombinedStatus(repo: pr.repoFullName, ref: sha)
-                    return (i, status ?? pr.buildStatus)
+                    let readiness = (try? await client.fetchReadiness(
+                        repo: pr.repoFullName,
+                        number: pr.number,
+                        expectedHeadSHA: pr.headSHA,
+                        filesChanged: pr.filesChanged
+                    )) ?? .unknown()
+                    return (i, readiness)
                 }
             }
 
@@ -156,8 +158,8 @@ actor PollingService {
                 addTask(index)
                 index += 1
             }
-            for await (i, status) in group {
-                results[i].buildStatus = status
+            for await (i, readiness) in group {
+                results[i].readiness = readiness
                 if index < prs.count {
                     addTask(index)
                     index += 1
@@ -167,9 +169,11 @@ actor PollingService {
         }
     }
 
-    /// Perform a full refresh: fetch PRs, categorize new ones, fetch build status.
+    /// Perform a full refresh: fetch PRs, categorize them, and refresh readiness.
     func refresh() async throws -> RefreshResult {
-        guard !settings.githubUsername.isEmpty else { return RefreshResult(prs: [], llmError: nil, repoErrors: []) }
+        guard !settings.githubUsername.isEmpty else {
+            return RefreshResult(prs: [], notificationCandidates: [], llmError: nil, repoErrors: [])
+        }
 
         let existingPRs = await persistence.loadPullRequests()
         var existingByID: [String: PullRequest] = [:]
@@ -244,14 +248,14 @@ actor PollingService {
                     let id = "\(item.repoFullName)#\(item.number)"
                     let existing = existingByID[id]
                     switch Self.fetchPlan(existing: existing, currentUpdatedAt: item.updatedAt) {
-                    case .reuseRefreshingStatus:
+                    case .reuseRefreshingReadiness:
                         if let existing { statusRefresh.append(existing) }
                     case .fullFetch:
                         itemsToFetch.append(item)
                     }
                 }
 
-                let refreshed = await refreshStatuses(statusRefresh)
+                let refreshed = await refreshReadiness(statusRefresh)
                 let fetched = try await githubClient.fetchDetails(
                     for: itemsToFetch,
                     username: settings.githubUsername
@@ -464,10 +468,72 @@ actor PollingService {
             }
         }
 
+        let transitions = Self.applyNotificationTransitions(
+            prs: allPRs,
+            existingByID: existingByID
+        )
+        allPRs = transitions.prs
+
         // Save
         try await persistence.savePullRequests(allPRs)
 
         let llmError = await categorizationService.consumeLastLLMError()
-        return RefreshResult(prs: allPRs, llmError: llmError, repoErrors: repoErrors)
+        return RefreshResult(
+            prs: allPRs,
+            notificationCandidates: transitions.candidates,
+            llmError: llmError,
+            repoErrors: repoErrors
+        )
+    }
+
+    static func applyNotificationTransitions(
+        prs: [PullRequest],
+        existingByID: [String: PullRequest]
+    ) -> (prs: [PullRequest], candidates: [PullRequest]) {
+        var updated = prs
+        var candidates: [PullRequest] = []
+
+        for index in updated.indices {
+            let existing = existingByID[updated[index].id]
+            let outcome = updated[index].readiness?.outcome
+
+            if existing == nil {
+                switch outcome {
+                case .ready:
+                    updated[index].readinessNotificationBaseline = true
+                    candidates.append(updated[index])
+                case .blocked:
+                    updated[index].readinessNotificationBaseline = false
+                case .unknown, nil:
+                    // A genuinely new PR that is initially unknown should notify
+                    // if a later refresh establishes readiness.
+                    updated[index].readinessNotificationBaseline = false
+                }
+                continue
+            }
+
+            let isLegacyBaseline = existing?.readiness == nil
+                && existing?.readinessNotificationBaseline == nil
+            if isLegacyBaseline {
+                if outcome == .ready {
+                    updated[index].readinessNotificationBaseline = true
+                } else if outcome == .blocked {
+                    updated[index].readinessNotificationBaseline = false
+                }
+                continue
+            }
+
+            let previous = existing?.readinessNotificationBaseline
+            switch outcome {
+            case .ready:
+                updated[index].readinessNotificationBaseline = true
+                if previous == false { candidates.append(updated[index]) }
+            case .blocked:
+                updated[index].readinessNotificationBaseline = false
+            case .unknown, nil:
+                updated[index].readinessNotificationBaseline = previous
+            }
+        }
+        return (updated, candidates)
     }
 }

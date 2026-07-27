@@ -88,7 +88,7 @@ struct MenuBarPRListView: View {
                 }
                 .toggleStyle(.button)
                 .controlSize(.small)
-                .help("Show only PRs with passing CI")
+                .help("Show only PRs ready for review")
 
                 Button {
                     showSearch.toggle()

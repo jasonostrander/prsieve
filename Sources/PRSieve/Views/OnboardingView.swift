@@ -69,7 +69,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 bullet("Pulls open PRs awaiting your review")
                 bullet("Categorizes them as Review, Watch, or Skip")
-                bullet("Notifies you when Review PRs pass CI")
+                bullet("Notifies you when Review PRs are ready")
             }
             .padding(.top, 8)
             Spacer()
@@ -93,7 +93,7 @@ struct OnboardingView: View {
                 Text("Connect to GitHub")
                     .font(.title2.weight(.semibold))
 
-                Text("PRSieve needs a personal access token to read your review requests, reviews, CODEOWNERS files, and CI status.")
+                Text("PRSieve needs a personal access token to read your review requests, reviews, CODEOWNERS files, required checks, and merge readiness.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -220,7 +220,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle("Notify me when Review PRs pass CI", isOn: $viewModel.notificationsEnabled)
+            Toggle("Notify me when Review PRs are ready", isOn: $viewModel.notificationsEnabled)
                 .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 10) {

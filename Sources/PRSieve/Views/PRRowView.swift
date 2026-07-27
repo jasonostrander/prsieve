@@ -101,7 +101,7 @@ struct PRCardView: View {
 
     private var reviewSummary: some View {
         HStack(spacing: 6) {
-            buildStatusPill
+            readinessPill
             reviewStatusPill
 
             if pr.humanCommentCount > 0 {
@@ -176,30 +176,36 @@ struct PRCardView: View {
     }
 
     @ViewBuilder
-    private var buildStatusPill: some View {
-        switch pr.buildStatus {
-        case .passed:
+    private var readinessPill: some View {
+        if pr.isReadyForReview {
             statusPill(
                 icon: "checkmark.circle.fill",
-                text: "CI passed",
+                text: "Ready for review",
                 foreground: .pillCIPassedText,
                 background: .pillCIPassedBg
             )
-        case .failed:
+        } else if pr.readiness?.blocker == .mergeConflict {
             statusPill(
                 icon: "xmark.circle.fill",
-                text: "CI failing",
+                text: "Merge conflict",
                 foreground: .pillCIFailedText,
                 background: .pillCIFailedBg
             )
-        case .running:
+        } else if pr.readiness?.requiredChecksStatus == .failed {
+            statusPill(
+                icon: "xmark.circle.fill",
+                text: "Required checks failing",
+                foreground: .pillCIFailedText,
+                background: .pillCIFailedBg
+            )
+        } else if pr.readiness?.requiredChecksStatus == .running {
             statusPill(
                 icon: "arrow.triangle.2.circlepath",
-                text: "CI running",
+                text: "Required checks running",
                 foreground: .pillCIRunningText,
                 background: .pillCIRunningBg
             )
-        default:
+        } else {
             EmptyView()
         }
     }

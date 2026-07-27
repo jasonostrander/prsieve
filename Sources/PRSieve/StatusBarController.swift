@@ -48,7 +48,7 @@ final class StatusBarController: NSObject {
     private func updateIcon() {
         let (hasPriority, hasLLMError) = withObservationTracking {
             (
-                viewModel.review.contains { $0.buildStatus == .passed },
+                viewModel.review.contains { $0.isReadyForReview },
                 viewModel.llmError != nil
             )
         } onChange: { [weak self] in
@@ -62,7 +62,7 @@ final class StatusBarController: NSObject {
             let config = NSImage.SymbolConfiguration(paletteColors: [.white, .systemRed])
             button.image = image?.withSymbolConfiguration(config)
         } else if hasPriority {
-            let image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle.fill", accessibilityDescription: "PRSieve — priority PRs ready")
+            let image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle.fill", accessibilityDescription: "PRSieve — priority PRs ready for review")
             let config = NSImage.SymbolConfiguration(paletteColors: [.white, .systemOrange])
             button.image = image?.withSymbolConfiguration(config)
         } else {

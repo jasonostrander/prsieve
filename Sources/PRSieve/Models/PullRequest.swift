@@ -42,10 +42,9 @@ struct PullRequest: Identifiable, Codable, Sendable {
     let labels: [String]
     let headBranch: String
     let baseBranch: String
-    /// HEAD commit SHA. Lets polling refresh CI status on its own (one
-    /// `/commits/{sha}/status` call) without a full detail fetch when a PR's
-    /// `updatedAt` is unchanged but its CI may still be in flight. `nil` for PRs
-    /// persisted before this field existed (forces a one-time full re-fetch).
+    /// HEAD commit SHA. Lets polling verify that GraphQL readiness was computed
+    /// for the expected commit when a PR's `updatedAt` is unchanged. `nil` for
+    /// PRs persisted before this field existed (forces a one-time full re-fetch).
     let headSHA: String?
     let body: String?
     let filesChanged: [String]
@@ -59,7 +58,12 @@ struct PullRequest: Identifiable, Codable, Sendable {
     var category: PRCategory
     var categoryOverridden: Bool
     var categoryReason: String
-    var buildStatus: BuildStatus?
+    /// Current GitHub merge/check readiness. `nil` for legacy cached PRs and
+    /// forces a one-time refresh after upgrading.
+    var readiness: PRReadiness? = nil
+    /// Last definitive ready/not-ready state used solely for notification
+    /// transitions. Unknown refreshes preserve this baseline.
+    var readinessNotificationBaseline: Bool? = nil
     var isMerged: Bool
     var isClosed: Bool
     var isFlagged: Bool
@@ -87,5 +91,9 @@ struct PullRequest: Identifiable, Codable, Sendable {
 
     var repoShortName: String {
         repoFullName.split(separator: "/").last.map(String.init) ?? repoFullName
+    }
+
+    var isReadyForReview: Bool {
+        readiness != nil && readiness?.blocker == nil
     }
 }

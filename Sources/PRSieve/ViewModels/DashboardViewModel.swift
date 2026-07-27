@@ -77,7 +77,7 @@ final class DashboardViewModel {
             .filter { !$0.isClosed }
             .filter { !$0.isMerged || isUnreviewedPriorityWithinGracePeriod($0) }
             .filter { !hideDrafts || !$0.isDraft }
-            .filter { !showReadyToMerge || $0.buildStatus == .passed }
+            .filter { !showReadyToMerge || $0.isReadyForReview }
             .filter { searchText.isEmpty || matchesSearch($0) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -131,9 +131,10 @@ final class DashboardViewModel {
             isInitialLoad = false
             invalidateSummaries()
 
-            // Send notifications for new priority PRs with passing CI
-            await notificationService?.notifyIfNeeded(prs: pullRequests, username: githubUsername)
-            await notificationService?.pruneNotified(currentPRIDs: Set(pullRequests.map(\.id)))
+            await notificationService?.notifyIfNeeded(
+                prs: result.notificationCandidates,
+                username: githubUsername
+            )
             // Re-generate summaries for collapsed sections
             for category in collapsedSections {
                 generateSummaryIfNeeded(for: category)

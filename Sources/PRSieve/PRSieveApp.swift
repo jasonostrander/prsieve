@@ -140,7 +140,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 final class AppState {
     private var persistence: PersistenceService?
     private var githubClient: GitHubClient?
-    private var buildkiteClient: BuildkiteClient?
     private var llmClient: LLMClient?
     private var notificationService: NotificationService?
 
@@ -178,21 +177,12 @@ final class AppState {
             || githubToken.isEmpty
             || settings.repos.isEmpty
             || settings.codeownerContext.isEmpty
-        let buildkiteToken = await persistence.loadToken(forKey: "buildkite_token") ?? ""
         let llmConfig = LLMConfig.loadFromBundle()
 
         if let existing = githubClient {
             await existing.updateToken(githubToken)
-            await existing.updateIgnoredCIChecks(settings.ignoredCIChecks)
         } else {
             githubClient = GitHubClient(token: githubToken)
-            await githubClient!.updateIgnoredCIChecks(settings.ignoredCIChecks)
-        }
-
-        if let existing = buildkiteClient {
-            await existing.updateCredentials(token: buildkiteToken, orgSlug: settings.buildkiteOrgSlug)
-        } else {
-            buildkiteClient = BuildkiteClient(token: buildkiteToken, orgSlug: settings.buildkiteOrgSlug)
         }
 
         let effectiveModel = settings.llmModel.isEmpty ? llmConfig.model : settings.llmModel
@@ -206,7 +196,6 @@ final class AppState {
         let pollingService = PollingService(
             persistence: persistence,
             githubClient: githubClient!,
-            buildkiteClient: buildkiteClient!,
             categorizationService: categorizationService,
             settings: settings
         )
@@ -216,7 +205,7 @@ final class AppState {
 
         if settings.notificationsEnabled {
             if notificationService == nil {
-                notificationService = NotificationService(persistence: persistence)
+                notificationService = NotificationService()
             }
             await notificationService!.requestAuthorization()
             viewModel.notificationService = notificationService

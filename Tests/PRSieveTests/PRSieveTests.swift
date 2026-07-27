@@ -74,7 +74,7 @@ func makePR(
     isSoleHumanReviewer: Bool = false,
     updatedAt: Date = Date(),
     baseBranch: String = "feature",
-    buildStatus: BuildStatus? = nil,
+    readiness: PRReadiness? = nil,
     headSHA: String? = "deadbeef"
 ) -> PullRequest {
     PullRequest(
@@ -102,11 +102,30 @@ func makePR(
         category: .low,
         categoryOverridden: false,
         categoryReason: "",
-        buildStatus: buildStatus,
+        readiness: readiness,
         isMerged: false,
         isClosed: false,
         isFlagged: false,
         lastCategorizedAt: nil
+    )
+}
+
+func makeReadiness(
+    outcome: ReadinessOutcome = .ready,
+    checks: RequiredChecksStatus = .passed,
+    mergeable: MergeableState = .mergeable,
+    mergeState: MergeStateStatus = .blocked,
+    reviewDecision: ReviewDecision? = .reviewRequired,
+    blocker: ReadinessBlocker? = nil
+) -> PRReadiness {
+    PRReadiness(
+        outcome: outcome,
+        requiredChecksStatus: checks,
+        mergeableState: mergeable,
+        mergeStateStatus: mergeState,
+        reviewDecision: reviewDecision,
+        blocker: blocker,
+        checkedAt: Date()
     )
 }
 
@@ -557,41 +576,200 @@ func runAllTests() async {
         t.checkEqual(reviewers[0].avatarURL?.absoluteString, "https://example.com/alice.png", "avatar URL preserved")
     }
 
-    // --- BuildStatus ---
+    // --- Required checks and readiness ---
 
     do {
-        t.checkEqual(BuildStatus.passed.symbol, "checkmark.circle.fill", "passed symbol")
-        t.checkEqual(BuildStatus.failed.symbol, "xmark.circle.fill", "failed symbol")
-        t.checkEqual(BuildStatus.running.symbol, "arrow.triangle.2.circlepath", "running symbol")
+        let rules = ActiveBranchRules(
+            requiredCheckNames: ["Buildkite", "olive/require-approvals"],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: false
+        )
+        let contexts = [
+            CheckContext(name: "Buildkite", isRequired: true, result: .passed),
+            CheckContext(name: "olive/require-approvals", isRequired: true, result: .passed),
+            CheckContext(name: "danger/danger", isRequired: false, result: .failed),
+        ]
+        let readiness = ReadinessEvaluator.evaluate(
+            state: "OPEN",
+            isDraft: false,
+            mergeableState: .mergeable,
+            mergeStateStatus: .blocked,
+            reviewDecision: .reviewRequired,
+            contexts: contexts,
+            rules: rules,
+            filesChanged: ["src/main.swift"],
+            headMatches: true
+        )
+        t.checkEqual(readiness.outcome, .ready, "optional failing check does not block readiness")
+        t.checkEqual(readiness.requiredChecksStatus, .passed, "all required checks passed")
     }
 
-    // GitHubCombinedStatus decoding
     do {
-        let json = #"{"state": "success", "total_count": 3}"#
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let status = try! decoder.decode(GitHubCombinedStatus.self, from: json.data(using: .utf8)!)
-        t.checkEqual(status.state, "success", "combined status state")
-        t.checkEqual(status.totalCount, 3, "combined status total count")
+        let rules = ActiveBranchRules(
+            requiredCheckNames: ["Buildkite"],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: false
+        )
+        var contexts = (0..<48).map {
+            CheckContext(name: "optional-\($0)", isRequired: false, result: .passed)
+        }
+        contexts.append(CheckContext(name: "Buildkite", isRequired: true, result: .failed))
+        let readiness = ReadinessEvaluator.evaluate(
+            state: "OPEN",
+            isDraft: false,
+            mergeableState: .mergeable,
+            mergeStateStatus: .blocked,
+            reviewDecision: .reviewRequired,
+            contexts: contexts,
+            rules: rules,
+            filesChanged: [],
+            headMatches: true
+        )
+        t.checkEqual(readiness.outcome, .blocked, "required failure after 30 contexts is detected")
+        t.checkEqual(readiness.blocker, .checksFailed, "required failure blocker")
     }
 
     do {
-        let json = #"{"state": "pending", "total_count": 0}"#
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let status = try! decoder.decode(GitHubCombinedStatus.self, from: json.data(using: .utf8)!)
-        t.checkEqual(status.state, "pending", "pending state")
-        t.checkEqual(status.totalCount, 0, "no checks pending")
+        let rules = ActiveBranchRules(
+            requiredCheckNames: ["Buildkite", "ISC code freeze"],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: false
+        )
+        let checks = ReadinessEvaluator.requiredChecksStatus(
+            contexts: [CheckContext(name: "Buildkite", isRequired: true, result: .passed)],
+            rules: rules
+        )
+        t.checkEqual(checks.status, .running, "missing required context is not treated as passed")
+        t.check(checks.missingRequiredCheck, "missing required context is reported")
     }
 
-    // Build status on PR model
+    do {
+        let rules = ActiveBranchRules(
+            requiredCheckNames: ["Buildkite"],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: false
+        )
+        let wrongSource = ReadinessEvaluator.requiredChecksStatus(
+            contexts: [CheckContext(name: "Buildkite", isRequired: false, result: .passed)],
+            rules: rules
+        )
+        t.checkEqual(wrongSource.status, .running, "same-name optional check cannot satisfy a required context")
+        t.check(wrongSource.missingRequiredCheck, "wrong-source same-name check remains missing")
+
+        let duplicate = ReadinessEvaluator.requiredChecksStatus(
+            contexts: [
+                CheckContext(name: "Buildkite", isRequired: true, result: .passed),
+                CheckContext(name: "Buildkite", isRequired: true, result: .failed),
+            ],
+            rules: rules
+        )
+        t.checkEqual(duplicate.status, .failed, "a failing duplicate required context wins")
+
+        let removedRule = ReadinessEvaluator.requiredChecksStatus(
+            contexts: [CheckContext(name: "old-required-check", isRequired: false, result: .failed)],
+            rules: .none
+        )
+        t.checkEqual(removedRule.status, .passed, "a check from a removed rule no longer blocks")
+    }
+
+    do {
+        func evaluate(
+            isDraft: Bool = false,
+            mergeable: MergeableState = .mergeable,
+            mergeState: MergeStateStatus = .clean,
+            review: ReviewDecision? = .reviewRequired,
+            contexts: [CheckContext] = [],
+            rules: ActiveBranchRules = .none,
+            headMatches: Bool = true
+        ) -> PRReadiness {
+            ReadinessEvaluator.evaluate(
+                state: "OPEN",
+                isDraft: isDraft,
+                mergeableState: mergeable,
+                mergeStateStatus: mergeState,
+                reviewDecision: review,
+                contexts: contexts,
+                rules: rules,
+                filesChanged: [],
+                headMatches: headMatches
+            )
+        }
+
+        t.checkEqual(evaluate(isDraft: true).blocker, .draft, "draft blocks readiness")
+        t.checkEqual(evaluate(mergeable: .conflicting).blocker, .mergeConflict, "merge conflict blocks readiness")
+        t.checkEqual(evaluate(review: .approved).blocker, .approvalAlreadySatisfied, "approved PR is not awaiting review")
+        t.checkEqual(evaluate(review: .changesRequested).blocker, .changesRequested, "changes requested blocks readiness")
+        t.checkEqual(evaluate(review: nil).blocker, .reviewNotRequired, "missing review requirement is not ready")
+        t.checkEqual(evaluate(mergeable: .unknown).outcome, .unknown, "unknown mergeability fails closed")
+        t.checkEqual(evaluate(headMatches: false).blocker, .headChanged, "head mismatch fails closed")
+
+        let unsupported = ActiveBranchRules(
+            requiredCheckNames: [],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: true
+        )
+        t.checkEqual(evaluate(rules: unsupported).outcome, .unknown, "unsupported blocking rule fails closed")
+
+        let strict = ActiveBranchRules(
+            requiredCheckNames: [],
+            strictRequiredChecks: true,
+            restrictedFilePatterns: [],
+            hasUnsupportedBlockingRules: false
+        )
+        t.checkEqual(evaluate(mergeState: .behind, rules: strict).blocker, .branchBehind, "strict branch must be current")
+        t.checkEqual(evaluate(mergeState: .unstable).outcome, .ready, "unstable optional checks do not block")
+    }
+
+    do {
+        let rules = ActiveBranchRules(
+            requiredCheckNames: [],
+            strictRequiredChecks: false,
+            restrictedFilePatterns: [".github/agents/*.md", "agents/*.md"],
+            hasUnsupportedBlockingRules: false
+        )
+        t.check(
+            ReadinessEvaluator.touchesRestrictedFile([".github/agents/foo.md"], patterns: rules.restrictedFilePatterns),
+            "restricted agent file matches"
+        )
+        t.check(
+            !ReadinessEvaluator.touchesRestrictedFile([".github/agents/nested/foo.md"], patterns: rules.restrictedFilePatterns),
+            "single-star restriction does not cross directories"
+        )
+    }
+
     do {
         var pr = makePR()
-        t.check(pr.buildStatus == nil, "default buildStatus is nil")
-        pr.buildStatus = .passed
-        t.checkEqual(pr.buildStatus, .passed, "buildStatus can be set to passed")
-        pr.buildStatus = .failed
-        t.checkEqual(pr.buildStatus, .failed, "buildStatus can be set to failed")
+        t.check(pr.readiness == nil, "legacy/default readiness is nil")
+        pr.readiness = makeReadiness()
+        t.check(pr.isReadyForReview, "persisted ready outcome drives computed readiness")
+        pr.readiness = makeReadiness(outcome: .unknown, checks: .unknown, blocker: .githubStateUnknown)
+        t.check(!pr.isReadyForReview, "unknown outcome is not ready")
+    }
+
+    do {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        var legacyObject = try! JSONSerialization.jsonObject(with: encoder.encode(makePR())) as! [String: Any]
+        legacyObject.removeValue(forKey: "readiness")
+        legacyObject.removeValue(forKey: "readinessNotificationBaseline")
+        let legacyData = try! JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyPR = try! decoder.decode(PullRequest.self, from: legacyData)
+        t.check(legacyPR.readiness == nil, "legacy persisted PR decodes without readiness")
+        t.check(legacyPR.readinessNotificationBaseline == nil, "legacy PR decodes without notification baseline")
+
+        var persisted = makePR(readiness: makeReadiness())
+        persisted.readinessNotificationBaseline = true
+        let roundTripped = try! decoder.decode(PullRequest.self, from: encoder.encode(persisted))
+        t.check(roundTripped.isReadyForReview, "persisted blocker-free readiness round trips")
+        t.checkEqual(roundTripped.readinessNotificationBaseline, true, "notification baseline round trips")
     }
 
     // --- AppSettings: hideDraftPRs ---
@@ -685,48 +863,28 @@ func runAllTests() async {
         t.checkEqual(decoded.model, "gpt-4o-mini", "config model decoded with unknown key present")
     }
 
-    // --- Priority + CI indicator logic ---
-    // Status bar icon highlights only when a priority PR has passing CI
+    // --- Priority + readiness indicator logic ---
 
     do {
-        let prs = [makePR()]  // default: category .low, no build status
-        let hasPriority = prs.filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
+        let prs = [makePR(readiness: makeReadiness())]
+        let hasPriority = prs.filter { $0.category == .priority }.contains { $0.isReadyForReview }
         t.check(!hasPriority, "low PRs don't trigger priority indicator")
     }
 
     do {
         var pr = makePR()
         pr.category = .priority
-        pr.buildStatus = .failed
-        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
-        t.check(!hasPriority, "priority PR with failed CI doesn't trigger indicator")
+        pr.readiness = makeReadiness(outcome: .blocked, checks: .failed, blocker: .checksFailed)
+        let hasPriority = [pr].contains { $0.category == .priority && $0.isReadyForReview }
+        t.check(!hasPriority, "blocked priority PR doesn't trigger indicator")
     }
 
     do {
         var pr = makePR()
         pr.category = .priority
-        pr.buildStatus = nil
-        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
-        t.check(!hasPriority, "priority PR with no CI doesn't trigger indicator")
-    }
-
-    do {
-        var pr = makePR()
-        pr.category = .priority
-        pr.buildStatus = .passed
-        let hasPriority = [pr].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
-        t.check(hasPriority, "priority PR with passing CI triggers indicator")
-    }
-
-    do {
-        var pr1 = makePR()
-        pr1.category = .priority
-        pr1.buildStatus = .failed
-        var pr2 = makePR()
-        pr2.category = .priority
-        pr2.buildStatus = .passed
-        let hasPriority = [pr1, pr2].filter { $0.category == .priority }.contains { $0.buildStatus == .passed }
-        t.check(hasPriority, "mixed priority PRs: one passing triggers indicator")
+        pr.readiness = makeReadiness()
+        let hasPriority = [pr].contains { $0.category == .priority && $0.isReadyForReview }
+        t.check(hasPriority, "ready priority PR triggers indicator")
     }
 
     // --- CodeownersParser: Pattern matching ---
@@ -926,15 +1084,12 @@ func runAllTests() async {
         t.checkEqual(result.category, .noise, "draft overrides direct codeowner")
     }
 
-    // --- Notification filtering logic ---
-    // Notifications should only fire for priority PRs with passing CI, not yet notified, not yet reviewed
+    // --- Notification filtering and readiness transitions ---
 
     do {
-        // Helper that mirrors NotificationService.notifyIfNeeded filtering
-        func shouldNotify(_ prs: [PullRequest], alreadyNotified: Set<String> = [], username: String = "") -> [PullRequest] {
+        func shouldNotify(_ prs: [PullRequest], username: String = "") -> [PullRequest] {
             prs.filter {
-                guard $0.category == .priority && $0.buildStatus == .passed else { return false }
-                guard !alreadyNotified.contains($0.id) else { return false }
+                guard $0.category == .priority && $0.isReadyForReview else { return false }
                 if !username.isEmpty && $0.reviewers.contains(where: {
                     $0.login.caseInsensitiveCompare(username) == .orderedSame && $0.state != .pending
                 }) { return false }
@@ -942,103 +1097,65 @@ func runAllTests() async {
             }
         }
 
-        // Priority + passing CI → notify
-        var pr1 = makePR()
+        var pr1 = makePR(readiness: makeReadiness())
         pr1.category = .priority
-        pr1.buildStatus = .passed
-        t.checkEqual(shouldNotify([pr1]).count, 1, "notify: priority + passing CI")
+        t.checkEqual(shouldNotify([pr1]).count, 1, "notify: priority + ready")
 
-        // Priority + failed CI → no notify
-        var pr2 = makePR()
+        var pr2 = makePR(readiness: makeReadiness(outcome: .blocked, checks: .failed, blocker: .checksFailed))
         pr2.category = .priority
-        pr2.buildStatus = .failed
-        t.checkEqual(shouldNotify([pr2]).count, 0, "no notify: priority + failed CI")
+        t.checkEqual(shouldNotify([pr2]).count, 0, "no notify: priority + blocked")
 
-        // Priority + no CI → no notify
-        var pr3 = makePR()
-        pr3.category = .priority
-        pr3.buildStatus = nil
-        t.checkEqual(shouldNotify([pr3]).count, 0, "no notify: priority + no CI")
-
-        // Priority + running CI → no notify
-        var pr4 = makePR()
-        pr4.category = .priority
-        pr4.buildStatus = .running
-        t.checkEqual(shouldNotify([pr4]).count, 0, "no notify: priority + running CI")
-
-        // Low + passing CI → no notify
-        var pr5 = makePR()
+        var pr5 = makePR(readiness: makeReadiness())
         pr5.category = .low
-        pr5.buildStatus = .passed
-        t.checkEqual(shouldNotify([pr5]).count, 0, "no notify: low + passing CI")
+        t.checkEqual(shouldNotify([pr5]).count, 0, "no notify: low + ready")
 
-        // Noise + passing CI → no notify
-        var pr6 = makePR()
-        pr6.category = .noise
-        pr6.buildStatus = .passed
-        t.checkEqual(shouldNotify([pr6]).count, 0, "no notify: noise + passing CI")
-
-        // Already notified → no duplicate
-        t.checkEqual(shouldNotify([pr1], alreadyNotified: [pr1.id]).count, 0, "no notify: already notified")
-
-        // Mix of PRs → only matching ones
-        t.checkEqual(shouldNotify([pr1, pr2, pr3, pr5]).count, 1, "notify: only priority+passing from mix")
-
-        // Already reviewed (approved) → no notify
-        var pr7 = makePR()
+        var pr7 = makePR(readiness: makeReadiness())
         pr7.category = .priority
-        pr7.buildStatus = .passed
         pr7.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .approved)]
         t.checkEqual(shouldNotify([pr7], username: "testuser").count, 0, "no notify: already approved")
 
-        // Already reviewed (changes requested) → no notify
-        var pr8 = makePR()
-        pr8.category = .priority
-        pr8.buildStatus = .passed
-        pr8.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .changesRequested)]
-        t.checkEqual(shouldNotify([pr8], username: "testuser").count, 0, "no notify: changes requested")
-
-        // Pending review → still notify
-        var pr9 = makePR()
+        var pr9 = makePR(readiness: makeReadiness())
         pr9.category = .priority
-        pr9.buildStatus = .passed
         pr9.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .pending)]
         t.checkEqual(shouldNotify([pr9], username: "testuser").count, 1, "notify: only pending review")
-
-        // Review dismissed → still notify (needs re-review)
-        var pr10 = makePR()
-        pr10.category = .priority
-        pr10.buildStatus = .passed
-        pr10.reviewers = [ReviewerInfo(login: "testuser", avatarURL: nil, state: .dismissed)]
-        t.checkEqual(shouldNotify([pr10], username: "testuser").count, 0, "no notify: dismissed counts as reviewed")
     }
 
-    // --- Notified PR IDs persistence ---
-
     do {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prsieve-test-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
+        var newReady = makePR(readiness: makeReadiness())
+        newReady.category = .priority
+        let first = PollingService.applyNotificationTransitions(prs: [newReady], existingByID: [:])
+        t.checkEqual(first.candidates.count, 1, "brand-new ready PR notifies")
+        t.checkEqual(first.prs[0].readinessNotificationBaseline, true, "new ready baseline stored")
 
-        if let persistence = try? PersistenceService(directory: dir) {
-            // Initially empty
-            let ids1 = await persistence.loadNotifiedPRIDs()
-            t.checkEqual(ids1.count, 0, "persistence: starts empty")
+        var legacy = makePR()
+        legacy.category = .priority
+        var migrated = legacy
+        migrated.readiness = makeReadiness()
+        let migration = PollingService.applyNotificationTransitions(
+            prs: [migrated],
+            existingByID: [legacy.id: legacy]
+        )
+        t.checkEqual(migration.candidates.count, 0, "legacy cached ready PR establishes baseline without notifying")
 
-            // Save and reload
-            let saved: Set<String> = ["owner/repo#1", "owner/repo#2", "owner/repo#3"]
-            await persistence.saveNotifiedPRIDs(saved)
-            let ids2 = await persistence.loadNotifiedPRIDs()
-            t.checkEqual(ids2, saved, "persistence: saves and reloads IDs")
+        var blocked = makePR(readiness: makeReadiness(outcome: .blocked, checks: .failed, blocker: .checksFailed))
+        blocked.readinessNotificationBaseline = false
+        var nowReady = blocked
+        nowReady.readiness = makeReadiness()
+        let transition = PollingService.applyNotificationTransitions(
+            prs: [nowReady],
+            existingByID: [blocked.id: blocked]
+        )
+        t.checkEqual(transition.candidates.count, 1, "not-ready to ready transition notifies")
 
-            // Overwrite
-            let updated: Set<String> = ["owner/repo#1"]
-            await persistence.saveNotifiedPRIDs(updated)
-            let ids3 = await persistence.loadNotifiedPRIDs()
-            t.checkEqual(ids3, updated, "persistence: overwrites correctly")
-        } else {
-            t.check(false, "persistence: failed to create PersistenceService with temp dir")
-        }
+        var previouslyReady = makePR(readiness: makeReadiness())
+        previouslyReady.readinessNotificationBaseline = true
+        var unknown = previouslyReady
+        unknown.readiness = makeReadiness(outcome: .unknown, checks: .unknown, blocker: .githubStateUnknown)
+        let throughUnknown = PollingService.applyNotificationTransitions(
+            prs: [unknown],
+            existingByID: [previouslyReady.id: previouslyReady]
+        )
+        t.checkEqual(throughUnknown.prs[0].readinessNotificationBaseline, true, "unknown preserves ready baseline")
     }
 
     // --- Reviewed by me detection ---
@@ -1433,53 +1550,55 @@ func runAllTests() async {
         // Changed since last sync (search updatedAt newer) → full fetch.
         t.checkEqual(
             PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .passed),
+                existing: makePR(updatedAt: stored),
                 currentUpdatedAt: stored.addingTimeInterval(60)
             ),
             .fullFetch,
             "newer updatedAt → full fetch"
         )
 
-        // Unchanged → always re-check CI (1 call), regardless of cached status. A
-        // previously-green build can flip to red on the same commit (e.g. a Buildkite
-        // re-run) without bumping updatedAt, so passed is no longer treated as settled.
-        for status in [BuildStatus.passed, .failed, .running, .unknown] {
+        // Unchanged → always re-check readiness (1 call), regardless of cached outcome.
+        for outcome in [ReadinessOutcome.ready, .blocked, .unknown] {
             t.checkEqual(
                 PollingService.fetchPlan(
-                    existing: makePR(updatedAt: stored, buildStatus: status, headSHA: "abc"),
+                    existing: makePR(
+                        updatedAt: stored,
+                        readiness: makeReadiness(outcome: outcome),
+                        headSHA: "abc"
+                    ),
                     currentUpdatedAt: stored
                 ),
-                .reuseRefreshingStatus,
-                "unchanged + \(status) CI + SHA → status-only refresh"
+                .reuseRefreshingReadiness,
+                "unchanged + \(outcome) readiness + SHA → readiness refresh"
             )
         }
         t.checkEqual(
             PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: nil, headSHA: "abc"),
+                existing: makePR(updatedAt: stored, readiness: nil, headSHA: "abc"),
                 currentUpdatedAt: stored
             ),
-            .reuseRefreshingStatus,
-            "unchanged + missing CI + SHA → status-only refresh"
+            .reuseRefreshingReadiness,
+            "unchanged + missing readiness + SHA → readiness refresh"
         )
 
         // Unchanged but no stored SHA (legacy data) → full fetch to learn it.
         t.checkEqual(
             PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .passed, headSHA: nil),
+                existing: makePR(updatedAt: stored, readiness: makeReadiness(), headSHA: nil),
                 currentUpdatedAt: stored
             ),
             .fullFetch,
             "unchanged + no SHA → full fetch"
         )
 
-        // Boundary: equal updatedAt counts as unchanged → status-only refresh.
+        // Boundary: equal updatedAt counts as unchanged → readiness refresh.
         t.checkEqual(
             PollingService.fetchPlan(
-                existing: makePR(updatedAt: stored, buildStatus: .passed, headSHA: "abc"),
+                existing: makePR(updatedAt: stored, readiness: makeReadiness(), headSHA: "abc"),
                 currentUpdatedAt: stored
             ),
-            .reuseRefreshingStatus,
-            "updatedAt == stored → unchanged → status-only refresh"
+            .reuseRefreshingReadiness,
+            "updatedAt == stored → unchanged → readiness refresh"
         )
     }
 
