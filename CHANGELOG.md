@@ -5,6 +5,9 @@ Claude-generated summary of the major changes in that release, produced by
 `release.sh` (see `RELEASING.md`). The latest entry is also shown in the in-app
 **Check for Updates…** dialog via the Sparkle appcast.
 
+## 0.9.7 — 2026-07-28
+- PR status pills now stack vertically, leaving more room for titles.
+
 ## 0.9.6 — 2026-07-27
 - Priority PRs now show full merge readiness (checks, reviews, and branch rules) instead of just CI status.
 
